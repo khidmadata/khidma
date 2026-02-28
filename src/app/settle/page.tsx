@@ -170,22 +170,23 @@ function Step1Adjustments({ monthYear, onNext }: { monthYear: string; onNext: ()
       {/* Add form */}
       <div className="card" style={{ marginBottom: 16 }}>
         <h3 style={{ fontSize: "0.9rem", marginBottom: 14 }}>إضافة تعديل</h3>
-        <input value={spSearch} onChange={e => { setSpSearch(e.target.value); setSelectedSp(null); }}
-          placeholder="ابحث باسم الكفيل أو الطفل..." className="input-field" style={{ marginBottom: 8 }} />
-
-        {spSearch && !selectedSp && filteredSp.length > 0 && (
-          <div className="search-dropdown" style={{ marginBottom: 12 }}>
-            {filteredSp.map(s => (
-              <button key={s.id} onClick={() => { setSelectedSp(s); setSpSearch(`${s.sponsors?.name} ← ${s.cases?.child_name}`); }}
-                style={{ width: "100%", padding: "10px 14px", border: "none", borderBottom: "1px solid var(--border-light)", background: "var(--surface)", cursor: "pointer", textAlign: "right", fontSize: "0.875rem" }}>
-                <span style={{ fontWeight: 600 }}>{s.sponsors?.name}</span>
-                <span style={{ color: "var(--text-3)", margin: "0 6px" }}>←</span>
-                <span>{s.cases?.child_name}</span>
-                <span style={{ fontSize: "0.75rem", color: "var(--indigo)", marginRight: 8 }}>({fmt(s.fixed_amount)} ج.م)</span>
-              </button>
-            ))}
-          </div>
-        )}
+        <div style={{ position: "relative", marginBottom: selectedSp ? 0 : 4 }}>
+          <input value={spSearch} onChange={e => { setSpSearch(e.target.value); setSelectedSp(null); }}
+            placeholder="ابحث باسم الكفيل أو الطفل..." className="input-field" />
+          {spSearch && !selectedSp && filteredSp.length > 0 && (
+            <div className="search-dropdown">
+              {filteredSp.map(s => (
+                <button key={s.id} onClick={() => { setSelectedSp(s); setSpSearch(`${s.sponsors?.name} ← ${s.cases?.child_name}`); }}
+                  className="search-dropdown-item">
+                  <span style={{ fontWeight: 600 }}>{s.sponsors?.name}</span>
+                  <span style={{ color: "var(--text-3)", margin: "0 6px" }}>←</span>
+                  <span>{s.cases?.child_name}</span>
+                  <span style={{ fontSize: "0.75rem", color: "var(--indigo)", marginRight: 8 }}>({fmt(s.fixed_amount)} ج.م)</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {selectedSp && (
           <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
