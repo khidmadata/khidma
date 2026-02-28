@@ -313,13 +313,13 @@ function OverviewTab({ sponsorData, totalObligation, totalCollected, paidCount, 
 
       {/* Stat grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, marginBottom: 20 }}>
-        <StatCard icon={Users}      label="الكفلاء النشطون"   value={sponsorData.length}        color="var(--indigo)" />
-        <StatCard icon={DollarSign} label="الالتزام الشهري"   value={fmt(totalObligation) + " ج"} color="var(--text-1)" />
+        <StatCard icon={Users}      label="الكفلاء النشطون"   value={sponsorData.length}          color="var(--indigo)" sub="عدد الكفلاء المسجلين في النظام" />
+        <StatCard icon={DollarSign} label="الالتزام الشهري"   value={fmt(totalObligation) + " ج"} color="var(--text-1)" sub="إجمالي ما يلتزم به الكفلاء من دفع شهرياً" />
         {isMonthly
-          ? <StatCard icon={TrendingUp}  label="تم تحصيله"      value={fmt(totalCollected) + " ج"} color="var(--green)" />
-          : <StatCard icon={DollarSign}  label="رصيد الصدقات"   value={fmt(sadaqatBal) + " ج"}     color="var(--green)" />
+          ? <StatCard icon={TrendingUp}  label="تم تحصيله"      value={fmt(totalCollected) + " ج"} color="var(--green)"  sub="المبلغ المستلم فعلياً حتى الآن هذا الشهر" />
+          : <StatCard icon={DollarSign}  label="رصيد الصدقات"   value={fmt(sadaqatBal) + " ج"}     color="var(--green)"  sub="الرصيد التراكمي المتاح للتوزيع من الصدقات" />
         }
-        <StatCard icon={Building2} label="إجمالي التوزيع"   value={fmt(totalDisb) + " ج"}       color="var(--indigo)" />
+        <StatCard icon={Building2} label="إجمالي التوزيع"   value={fmt(totalDisb) + " ج"}         color="var(--indigo)" sub="مجموع الكفالات المستحقة للمستفيدين بحسب المناطق" />
       </div>
 
       {/* Collection progress (month mode) */}
@@ -346,16 +346,16 @@ function OverviewTab({ sponsorData, totalObligation, totalCollected, paidCount, 
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
           {[
-            { label: "إجمالي الوارد", val: sadaqatIn,  icon: TrendingUp  },
-            { label: "إجمالي الصادر", val: sadaqatOut, icon: TrendingDown },
-            { label: "الرصيد الحالي", val: sadaqatBal, large: true },
+            { label: "إجمالي الوارد", val: sadaqatIn,  note: "تبرعات مستلمة" },
+            { label: "إجمالي الصادر", val: sadaqatOut, note: "موزّع على حالات" },
+            { label: "الرصيد الحالي", val: sadaqatBal, note: "المتبقي للتوزيع", large: true },
           ].map((item, i) => (
             <div key={i} style={{ textAlign: "center" }}>
               <div style={{ fontSize: "0.68rem", opacity: 0.65, marginBottom: 4 }}>{item.label}</div>
               <div style={{ fontSize: item.large ? "1.5rem" : "1.1rem", fontWeight: 800 }}>
                 {fmt(item.val)}
               </div>
-              <div style={{ fontSize: "0.65rem", opacity: 0.5 }}>ج.م</div>
+              <div style={{ fontSize: "0.63rem", opacity: 0.45, marginTop: 2 }}>{item.note}</div>
             </div>
           ))}
         </div>
@@ -663,11 +663,14 @@ function LocationsTab({ areaBreakdown, areaMap, totalObligation }: any) {
       <div className="card" style={{ marginTop: 16 }}>
         <h3 style={{ fontSize: "0.9rem", marginBottom: 16 }}>📋 ملخص التسوية</h3>
         {[
-          { label: "إجمالي الالتزام الشهري",  value: fmt(totalObligation), color: "var(--text-1)" },
-          { label: "إجمالي التوزيع المطلوب",   value: fmt(totalAll),        color: "var(--indigo)" },
+          { label: "إجمالي الالتزام الشهري",  value: fmt(totalObligation), color: "var(--text-1)", note: "ما يلتزم به الكفلاء من دفع" },
+          { label: "إجمالي التوزيع المطلوب",   value: fmt(totalAll),        color: "var(--indigo)", note: "ما يُصرف للمستفيدين عبر المناطق" },
         ].map((row, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "0.65rem 0", borderBottom: "1px solid var(--border-light)" }}>
-            <span style={{ color: "var(--text-2)", fontSize: "0.875rem" }}>{row.label}</span>
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.65rem 0", borderBottom: "1px solid var(--border-light)" }}>
+            <div>
+              <div style={{ color: "var(--text-2)", fontSize: "0.875rem" }}>{row.label}</div>
+              <div style={{ color: "var(--text-3)", fontSize: "0.7rem", marginTop: 1 }}>{row.note}</div>
+            </div>
             <strong style={{ color: row.color }}>{row.value} ج.م</strong>
           </div>
         ))}
