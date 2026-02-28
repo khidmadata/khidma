@@ -109,6 +109,7 @@ function Step1Adjustments({ monthYear, onNext }: { monthYear: string; onNext: ()
   const [saving,       setSaving]       = useState(false);
 
   const [spSearch,   setSpSearch]   = useState("");
+  const [spFocused,  setSpFocused]  = useState(false);
   const [selectedSp, setSelectedSp] = useState<Sponsorship | null>(null);
   const [adjType,    setAdjType]    = useState("one_time_extra");
   const [adjAmount,  setAdjAmount]  = useState("");
@@ -127,8 +128,8 @@ function Step1Adjustments({ monthYear, onNext }: { monthYear: string; onNext: ()
   }, [monthYear]);
 
   const filteredSp = useMemo(() => {
-    if (!spSearch) return [];
-    return sponsorships.filter(s => s.sponsors?.name?.includes(spSearch) || s.cases?.child_name?.includes(spSearch)).slice(0, 15);
+    if (!spSearch) return sponsorships.slice(0, 20);
+    return sponsorships.filter(s => s.sponsors?.name?.includes(spSearch) || s.cases?.child_name?.includes(spSearch)).slice(0, 20);
   }, [sponsorships, spSearch]);
 
   async function addAdjustment() {
@@ -171,12 +172,18 @@ function Step1Adjustments({ monthYear, onNext }: { monthYear: string; onNext: ()
       <div className="card" style={{ marginBottom: 16 }}>
         <h3 style={{ fontSize: "0.9rem", marginBottom: 14 }}>إضافة تعديل</h3>
         <div style={{ position: "relative", marginBottom: selectedSp ? 0 : 4 }}>
-          <input value={spSearch} onChange={e => { setSpSearch(e.target.value); setSelectedSp(null); }}
-            placeholder="ابحث باسم الكفيل أو الطفل..." className="input-field" />
-          {spSearch && !selectedSp && filteredSp.length > 0 && (
+          <input
+            value={spSearch}
+            onChange={e => { setSpSearch(e.target.value); setSelectedSp(null); }}
+            onFocus={() => setSpFocused(true)}
+            onBlur={() => setTimeout(() => setSpFocused(false), 150)}
+            placeholder="انقر للاختيار أو ابحث باسم الكفيل / الطفل..."
+            className="input-field"
+          />
+          {spFocused && !selectedSp && filteredSp.length > 0 && (
             <div className="search-dropdown">
               {filteredSp.map(s => (
-                <button key={s.id} onClick={() => { setSelectedSp(s); setSpSearch(`${s.sponsors?.name} ← ${s.cases?.child_name}`); }}
+                <button key={s.id} onMouseDown={() => { setSelectedSp(s); setSpSearch(`${s.sponsors?.name} ← ${s.cases?.child_name}`); setSpFocused(false); }}
                   className="search-dropdown-item">
                   <span style={{ fontWeight: 600 }}>{s.sponsors?.name}</span>
                   <span style={{ color: "var(--text-3)", margin: "0 6px" }}>←</span>
