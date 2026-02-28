@@ -49,7 +49,8 @@ function fmtMonth(m: string) {
 function genMonthOptions() {
   const opts: { value: string; label: string }[] = [{ value: "all", label: "كل الوقت ★" }];
   const now = new Date();
-  for (let i = 0; i < 24; i++) {
+  // Start from 1 month ahead so the working month is always available
+  for (let i = -1; i < 24; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     opts.push({ value, label: fmtMonth(value) });
@@ -59,7 +60,12 @@ function genMonthOptions() {
 
 function currentMonth() {
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  // In the last 7 days of the month, default to next month (prepare ahead)
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const d = now.getDate() >= lastDay - 6
+    ? new Date(now.getFullYear(), now.getMonth() + 1, 1)
+    : now;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function StatusBadge({ paid, obligation }: { paid: number; obligation: number }) {

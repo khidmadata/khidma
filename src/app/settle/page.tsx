@@ -20,7 +20,7 @@ const MONTHS_AR: Record<string, string> = {
 function genMonthOptions() {
   const opts: { value: string; label: string }[] = [];
   const now = new Date();
-  for (let i = 0; i < 24; i++) {
+  for (let i = -1; i < 24; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     opts.push({ value, label: `${MONTHS_AR[value.split("-")[1]]} ${value.split("-")[0]}` });
@@ -29,7 +29,11 @@ function genMonthOptions() {
 }
 
 function currentMonth() {
-  const d = new Date();
+  const now = new Date();
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const d = now.getDate() >= lastDay - 6
+    ? new Date(now.getFullYear(), now.getMonth() + 1, 1)
+    : now;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
