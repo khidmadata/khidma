@@ -127,15 +127,19 @@ export default function Home() {
     (async () => {
       setLoading(true);
       const [spRes, shRes, arRes, opRes, saRes, avRes] = await Promise.all([
-        supabase.from("sponsors").select("*").eq("is_active", true).order("legacy_id"),
+        // legacy_id=126 is the virtual "صدقات" account — not a real sponsor, excluded from obligation
+        supabase.from("sponsors").select("*").eq("is_active", true).neq("legacy_id", 126).order("legacy_id"),
         supabase.from("sponsorships").select("*, cases(child_name, area_id)").eq("status", "active"),
         supabase.from("areas").select("*"),
         supabase.from("operators").select("*").neq("name", "شريف"),
         supabase.from("sadaqat_pool").select("*").order("created_at"),
         supabase.from("advance_payments").select("*, sponsors(name), cases(child_name)").eq("status", "active"),
       ]);
-      setSponsors(spRes.data || []);
-      setSponsorships(shRes.data || []);
+      const activeSponsors = spRes.data || [];
+      // Only count sponsorships belonging to real (non-صدقات) sponsors
+      const validSponsorIds = new Set(activeSponsors.map((s: Sponsor) => s.id));
+      setSponsors(activeSponsors);
+      setSponsorships((shRes.data || []).filter(sh => validSponsorIds.has(sh.sponsor_id)));
       setAreas(arRes.data || []);
       setOperators(opRes.data || []);
       setSadaqat(saRes.data || []);
