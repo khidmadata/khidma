@@ -246,7 +246,16 @@ function SettlementTable({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [addSearch, setAddSearch] = useState("");
-  const [showAddSearch, setShowAddSearch] = useState(false);
+  const [showAddPanel, setShowAddPanel] = useState(false);
+  const [addMode, setAddMode] = useState<"existing" | "new">("existing");
+
+  // New case form state
+  const [newChildName,    setNewChildName]    = useState("");
+  const [newGuardianName, setNewGuardianName] = useState("");
+  const [newSponsorName,  setNewSponsorName]  = useState("");
+  const [newFixed,        setNewFixed]        = useState("");
+  const [newCaseType,     setNewCaseType]     = useState("orphan");
+  const [addingNew,       setAddingNew]       = useState(false);
 
   useEffect(() => {
     load();
@@ -360,7 +369,79 @@ function SettlementTable({
     };
     setRows(prev => [...prev, newRow]);
     setAddSearch("");
-    setShowAddSearch(false);
+    setShowAddPanel(false);
+  }
+
+  async function createNewCase() {
+    if (!newChildName.trim() || !newSponsorName.trim() || !newFixed || Number(newFixed) <= 0) return;
+    setAddingNew(true);
+
+    // 1. Find or create sponsor
+    const { data: existingSps } = await supabase
+      .from("sponsors")
+      .select("id, name")
+      .ilike("name", newSponsorName.trim())
+      .limit(1);
+    let sponsorId: string;
+    if (existingSps && existingSps.length > 0) {
+      sponsorId = existingSps[0].id;
+    } else {
+      const { data: newSp, error: spErr } = await supabase
+        .from("sponsors")
+        .insert({ name: newSponsorName.trim() })
+        .select("id")
+        .single();
+      if (spErr || !newSp) { alert("خطأ في إنشاء الكفيل: " + spErr?.message); setAddingNew(false); return; }
+      sponsorId = newSp.id;
+    }
+
+    // 2. Create case
+    const { data: newCase, error: cErr } = await supabase
+      .from("cases")
+      .insert({
+        child_name:    newChildName.trim(),
+        guardian_name: newGuardianName.trim() || null,
+        area_id:       area?.id || null,
+        case_type:     newCaseType,
+        status:        "active",
+      })
+      .select("id")
+      .single();
+    if (cErr || !newCase) { alert("خطأ في إنشاء الحالة: " + cErr?.message); setAddingNew(false); return; }
+
+    // 3. Create sponsorship
+    const { data: newSp, error: spErr2 } = await supabase
+      .from("sponsorships")
+      .insert({
+        sponsor_id:   sponsorId,
+        case_id:      newCase.id,
+        fixed_amount: Number(newFixed),
+        status:       "active",
+      })
+      .select("id")
+      .single();
+    if (spErr2 || !newSp) { alert("خطأ في إنشاء الكفالة: " + spErr2?.message); setAddingNew(false); return; }
+
+    // 4. Add row to table
+    const row: SettleRow = {
+      sponsorship_id: newSp.id,
+      sponsor_id:     sponsorId,
+      case_id:        newCase.id,
+      child_name:     newChildName.trim(),
+      guardian_name:  newGuardianName.trim() || null,
+      sponsor_name:   newSponsorName.trim(),
+      fixed:          Number(newFixed),
+      newFixed:       Number(newFixed),
+      extras: 0, newExtras: 0, extra_adj_id: null,
+      included: true, collected: false, received_by: "", editing: false,
+    };
+    setRows(prev => [...prev, row]);
+
+    // Reset form
+    setNewChildName(""); setNewGuardianName(""); setNewSponsorName("");
+    setNewFixed(""); setNewCaseType("orphan");
+    setShowAddPanel(false);
+    setAddingNew(false);
   }
 
   async function saveAndContinue() {
@@ -456,7 +537,7 @@ function SettlementTable({
           </p>
         </div>
         <button
-          onClick={() => setShowAddSearch(v => !v)}
+          onClick={() => { setShowAddPanel(v => !v); setAddMode("existing"); }}
           className="btn btn-secondary btn-sm"
           style={{ gap: 4 }}
         >
@@ -464,19 +545,86 @@ function SettlementTable({
         </button>
       </div>
 
-      {/* Add-case search */}
-      {showAddSearch && (
+      {/* Add-case panel */}
+      {showAddPanel && (
         <div className="card" style={{ marginBottom: 12, padding: "0.875rem" }}>
-          <p style={{ fontSize: "0.8rem", color: "var(--text-2)", marginBottom: 8 }}>
-            ابحث عن كفالة لإضافتها للقائمة:
-          </p>
-          <SpSearch
-            sponsorships={addableSps}
-            value={addSearch}
-            onChange={setAddSearch}
-            onSelect={sp => addSponsorship(sp)}
-            placeholder="ابحث باسم الكفيل أو الطفل..."
-          />
+          {/* Mode tabs */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            {([["existing", "كفالة موجودة"], ["new", "حالة جديدة"]] as [string, string][]).map(([v, lbl]) => (
+              <button
+                key={v}
+                onClick={() => setAddMode(v as any)}
+                className="btn btn-sm"
+                style={{
+                  flex: 1,
+                  background: addMode === v ? "var(--green-light)" : "var(--surface)",
+                  color:      addMode === v ? "var(--green)"       : "var(--text-3)",
+                  border:     addMode === v ? "2px solid var(--green)" : "1.5px solid var(--border)",
+                  fontWeight: 600,
+                }}
+              >{lbl}</button>
+            ))}
+          </div>
+
+          {/* Search existing */}
+          {addMode === "existing" && (
+            <SpSearch
+              sponsorships={addableSps}
+              value={addSearch}
+              onChange={setAddSearch}
+              onSelect={sp => addSponsorship(sp)}
+              placeholder="ابحث باسم الكفيل أو الطفل..."
+            />
+          )}
+
+          {/* New case form */}
+          {addMode === "new" && (
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label className="field-label">اسم الطفل *</label>
+                  <input value={newChildName} onChange={e => setNewChildName(e.target.value)}
+                    className="input-field" placeholder="الاسم الكامل للطفل" />
+                </div>
+                <div>
+                  <label className="field-label">اسم العائل / ولي الأمر</label>
+                  <input value={newGuardianName} onChange={e => setNewGuardianName(e.target.value)}
+                    className="input-field" placeholder="اختياري" />
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label className="field-label">اسم الكفيل *</label>
+                  <input value={newSponsorName} onChange={e => setNewSponsorName(e.target.value)}
+                    className="input-field" placeholder="سيُنشأ تلقائياً إن لم يكن موجوداً" />
+                </div>
+                <div>
+                  <label className="field-label">نوع الحالة</label>
+                  <select value={newCaseType} onChange={e => setNewCaseType(e.target.value)} className="select-field">
+                    <option value="orphan">كفالة يتيم</option>
+                    <option value="student">طالب علم</option>
+                    <option value="medical">حالة مرضية</option>
+                    <option value="special">حالة خاصة</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "flex-end" }}>
+                <div>
+                  <label className="field-label">مبلغ الكفالة الشهري (ج) *</label>
+                  <input type="number" value={newFixed} onChange={e => setNewFixed(e.target.value)}
+                    className="input-field" dir="ltr" placeholder="0" />
+                </div>
+                <button
+                  onClick={createNewCase}
+                  disabled={addingNew || !newChildName.trim() || !newSponsorName.trim() || !newFixed || Number(newFixed) <= 0}
+                  className="btn btn-primary"
+                  style={{ whiteSpace: "nowrap" }}
+                >
+                  {addingNew ? "جاري الحفظ..." : "+ إنشاء وإضافة"}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
