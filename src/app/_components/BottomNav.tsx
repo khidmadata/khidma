@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ClipboardList, UserPlus, FileText } from "lucide-react";
+import { LayoutDashboard, ClipboardList, UserPlus, FileText, Heart } from "lucide-react";
 
 const NAV = [
   { href: "/",         label: "الرئيسية", Icon: LayoutDashboard },
   { href: "/tahseel",  label: "التحصيل",  Icon: ClipboardList },
+  { href: "/sadaqat",  label: "الصدقات",  Icon: Heart },
   { href: "/register", label: "تسجيل",    Icon: UserPlus },
   { href: "/settle",   label: "تسوية",    Icon: FileText },
 ];

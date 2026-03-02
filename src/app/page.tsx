@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import {
   Users, DollarSign, TrendingUp, TrendingDown, Building2,
-  Search, Plus, FileText, ChevronDown, ClipboardList
+  Search, Plus, FileText, ChevronDown, ClipboardList, Archive
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -273,6 +273,7 @@ export default function Home() {
     { id: "sponsors",   label: "أرصدة الكفلاء",    icon: Users        },
     { id: "sadaqat",    label: "صندوق الصدقات",     icon: DollarSign   },
     { id: "locations",  label: "التوزيع الشهري",    icon: Building2    },
+    { id: "archive",    label: "أرشيف التقارير",    icon: Archive      },
   ];
 
   if (loading) return (
@@ -338,6 +339,7 @@ export default function Home() {
         {tab === "sponsors"  && <SponsorsTab  sponsorData={sponsorData} advances={advances} selectedMonth={selectedMonth} />}
         {tab === "sadaqat"   && <SadaqatTab   sadaqat={sadaqat} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} selectedMonth={selectedMonth} />}
         {tab === "locations" && <LocationsTab areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} totalObligation={displayObligation} selectedMonth={selectedMonth} />}
+        {tab === "archive"   && <ArchiveTab   areas={areas} />}
       </main>
 
       <footer style={{ textAlign: "center", padding: "1.5rem", fontSize: "0.72rem", color: "var(--text-3)", borderTop: "1px solid var(--border-light)" }}>
@@ -760,3 +762,142 @@ function LocationsTab({ areaBreakdown, areaMap, totalObligation, selectedMonth }
   );
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════
+// ARCHIVE TAB
+// ═══════════════════════════════════════════════════════════════════════
+function ArchiveTab({ areas }: { areas: Area[] }) {
+  const [months,         setMonths]         = useState<string[]>([]);
+  const [selectedMonth,  setSelectedMonth]  = useState<string>("");
+  const [disbursements,  setDisbursements]  = useState<{ area_id: string; fixed_total: number; extras_total: number }[]>([]);
+  const [sadaqatSummary, setSadaqatSummary] = useState<{ in: number; out: number } | null>(null);
+  const [loading,        setLoading]        = useState(true);
+
+  const areaMap = useMemo(() => Object.fromEntries(areas.map(a => [a.id, a.name])), [areas]);
+
+  useEffect(() => {
+    (async () => {
+      const res = await supabase.from("disbursements").select("month_year");
+      const unique = [...new Set((res.data || []).map((d: any) => d.month_year as string))]
+        .sort().reverse();
+      setMonths(unique);
+      if (unique.length > 0) setSelectedMonth(unique[0]);
+      setLoading(false);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedMonth) return;
+    Promise.all([
+      supabase.from("disbursements").select("area_id, fixed_total, extras_total").eq("month_year", selectedMonth),
+      supabase.from("sadaqat_pool").select("transaction_type, amount").eq("month_year", selectedMonth),
+    ]).then(([disbRes, sadRes]) => {
+      setDisbursements(disbRes.data || []);
+      const sadData: any[] = sadRes.data || [];
+      const sadIn  = sadData.filter(e => e.transaction_type === "inflow") .reduce((s: number, e: any) => s + Number(e.amount), 0);
+      const sadOut = sadData.filter(e => e.transaction_type === "outflow").reduce((s: number, e: any) => s + Number(e.amount), 0);
+      setSadaqatSummary(sadIn + sadOut > 0 ? { in: sadIn, out: sadOut } : null);
+    });
+  }, [selectedMonth]);
+
+  if (loading) return <div style={{ textAlign: "center", padding: "3rem", color: "var(--text-3)" }}>جاري التحميل...</div>;
+
+  if (months.length === 0) return (
+    <div style={{ textAlign: "center", padding: "3rem", color: "var(--text-3)" }}>
+      لا توجد بيانات تسوية مؤرشفة حتى الآن.
+    </div>
+  );
+
+  const monthTotal = disbursements.reduce((s, d) => s + Number(d.fixed_total) + Number(d.extras_total), 0);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+        <h2 style={{ margin: 0 }}>أرشيف التقارير</h2>
+        <span style={{ fontSize: "0.8rem", color: "var(--text-3)" }}>{months.length} شهر</span>
+      </div>
+      <p style={{ fontSize: "0.82rem", color: "var(--text-3)", marginBottom: 16, margin: "0 0 1rem" }}>
+        اختر شهراً لعرض تقاريره أو فتح التسوية للتعديل
+      </p>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
+        {months.map(m => (
+          <button
+            key={m}
+            onClick={() => setSelectedMonth(m)}
+            className="btn btn-sm"
+            style={{
+              background: selectedMonth === m ? "var(--green)" : "var(--surface)",
+              color:      selectedMonth === m ? "white"        : "var(--text-2)",
+              border:     selectedMonth === m ? "none"         : "1.5px solid var(--border)",
+              fontWeight: selectedMonth === m ? 700            : 500,
+            }}
+          >
+            {fmtMonth(m)}
+          </button>
+        ))}
+      </div>
+
+      {selectedMonth && (
+        <>
+          <div className="card" style={{ marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: "1.05rem" }}>{fmtMonth(selectedMonth)}</div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-3)", marginTop: 2 }}>
+                {disbursements.length} منطقة — إجمالي: {fmt(monthTotal)} ج
+              </div>
+            </div>
+            <Link href="/settle" className="btn btn-secondary btn-sm">✏ تسوية جديدة</Link>
+          </div>
+
+          <div style={{ display: "grid", gap: 10, marginBottom: 16 }}>
+            {disbursements.map(d => {
+              const total = Number(d.fixed_total) + Number(d.extras_total);
+              return (
+                <div key={d.area_id} className="card" style={{ padding: "1rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: "1rem" }}>{areaMap[d.area_id] || "منطقة"}</div>
+                      <div style={{ fontSize: "0.72rem", color: "var(--amber)", marginTop: 2 }}>
+                        كفالات {fmt(Number(d.fixed_total))} + زيادات {fmt(Number(d.extras_total))} = {fmt(total)} ج
+                      </div>
+                    </div>
+                    <Link
+                      href={`/report?area=${d.area_id}&month=${selectedMonth}`}
+                      className="btn btn-primary btn-sm"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <FileText size={13} /> عرض / طباعة
+                    </Link>
+                  </div>
+                  <ProgressBar value={total} max={monthTotal} color="var(--indigo)" />
+                </div>
+              );
+            })}
+          </div>
+
+          {sadaqatSummary ? (
+            <div className="card" style={{ background: "var(--green-light)", border: "1.5px solid var(--green)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: "1rem", color: "var(--green)" }}>💰 صدقات {fmtMonth(selectedMonth)}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--text-2)", marginTop: 3 }}>
+                    وارد: {fmt(sadaqatSummary.in)} ج · صادر: {fmt(sadaqatSummary.out)} ج
+                  </div>
+                </div>
+                <Link href="/sadaqat" className="btn btn-secondary btn-sm" style={{ borderColor: "var(--green)", color: "var(--green)" }}>
+                  تقرير الصدقات
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: "0.8rem", color: "var(--text-3)", textAlign: "center", padding: "0.75rem" }}>
+              لا توجد حركات صدقات في {fmtMonth(selectedMonth)}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
