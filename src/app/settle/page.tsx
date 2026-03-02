@@ -245,6 +245,7 @@ function SettlementTable({
   const [operators, setOperators] = useState<Operator[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [summary, setSummary] = useState<{ opName: string; amount: number }[] | null>(null);
   const [addSearch, setAddSearch] = useState("");
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [addMode, setAddMode] = useState<"existing" | "new">("existing");
@@ -509,14 +510,129 @@ function SettlementTable({
       }
     }
 
-    setSaving(false);
-    if (errors.length) {
-      alert("حدثت بعض الأخطاء:\n" + errors.join("\n"));
+    // Save collection records (group by sponsor_id, sum all their included+collected rows)
+    const sponsorMap: Record<string, { fixed: number; extras: number; received_by: string }> = {};
+    for (const row of rows) {
+      if (!row.included || !row.collected) continue;
+      if (!sponsorMap[row.sponsor_id]) {
+        sponsorMap[row.sponsor_id] = { fixed: 0, extras: 0, received_by: row.received_by };
+      }
+      sponsorMap[row.sponsor_id].fixed  += row.newFixed;
+      sponsorMap[row.sponsor_id].extras += row.newExtras;
+      if (!sponsorMap[row.sponsor_id].received_by && row.received_by) {
+        sponsorMap[row.sponsor_id].received_by = row.received_by;
+      }
     }
-    onNext();
+    for (const [sponsorId, data] of Object.entries(sponsorMap)) {
+      const totalAmount = data.fixed + data.extras;
+      // Delete any existing collection record for this sponsor+month to avoid duplicates
+      await supabase.from("collections").delete()
+        .eq("sponsor_id", sponsorId).eq("month_year", monthYear);
+      const { error: colErr } = await supabase.from("collections").insert({
+        sponsor_id:              sponsorId,
+        amount:                  totalAmount,
+        fixed_portion:           data.fixed,
+        extra_portion:           data.extras,
+        sadaqat_portion:         0,
+        month_year:              monthYear,
+        received_by_operator_id: data.received_by || null,
+        payment_method:          "cash",
+        status:                  "paid",
+      });
+      if (colErr) errors.push(colErr.message);
+    }
+
+    // Build operator receipt summary
+    const opTotals: Record<string, number> = {};
+    for (const row of rows) {
+      if (!row.included || !row.collected || !row.received_by) continue;
+      opTotals[row.received_by] = (opTotals[row.received_by] || 0) + row.newFixed + row.newExtras;
+    }
+    const summaryList = operators
+      .filter(o => opTotals[o.id])
+      .map(o => ({ opName: o.name, amount: opTotals[o.id] }));
+
+    setSaving(false);
+    if (errors.length) alert("حدثت بعض الأخطاء:\n" + errors.join("\n"));
+    setSummary(summaryList);
   }
 
   if (loading) return <Loader />;
+
+  // ── Receipt summary screen (shown after save) ──
+  if (summary !== null) {
+    const collectedRows = rows.filter(r => r.included && r.collected);
+    const collectedTotal = collectedRows.reduce((s, r) => s + r.newFixed + r.newExtras, 0);
+    const includedTotal  = rows.filter(r => r.included).reduce((s, r) => s + r.newFixed + r.newExtras, 0);
+    return (
+      <div>
+        <h2 style={{ marginBottom: 4 }}>ملخص الاستلام — {fmtMonth(monthYear)}</h2>
+        <p style={{ fontSize: "0.82rem", color: "var(--text-3)", margin: "0 0 1.25rem" }}>
+          {area ? area.name : "إدخال يدوي"} — للمتابعة الداخلية فقط، لا يظهر في التقرير
+        </p>
+
+        {/* Operator breakdown */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: "0.9rem", marginBottom: 14 }}>استلام المبالغ</h3>
+          {summary.length === 0 ? (
+            <p style={{ fontSize: "0.85rem", color: "var(--text-3)" }}>
+              لم يتم تحديد مستلم لأي دفعة
+            </p>
+          ) : (
+            <div style={{ display: "grid", gap: 10 }}>
+              {summary.map(s => (
+                <div key={s.opName} style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  background: "var(--green-light)", borderRadius: "var(--radius-sm)",
+                  padding: "0.875rem 1rem", border: "1px solid var(--border)",
+                }}>
+                  <div style={{ fontWeight: 700, fontSize: "1rem" }}>{s.opName}</div>
+                  <div style={{ fontWeight: 800, fontSize: "1.15rem", color: "var(--green)" }}>
+                    {fmt(s.amount)} ج
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", fontSize: "0.875rem" }}>
+            <span style={{ color: "var(--text-2)" }}>تم تحصيله</span>
+            <strong style={{ color: "var(--green)" }}>{fmt(collectedTotal)} ج</strong>
+          </div>
+          {collectedTotal < includedTotal && (
+            <div style={{ marginTop: 6, fontSize: "0.78rem", color: "var(--amber)", display: "flex", justifyContent: "space-between" }}>
+              <span>لم يُحصَّل بعد</span>
+              <strong>{fmt(includedTotal - collectedTotal)} ج</strong>
+            </div>
+          )}
+        </div>
+
+        {/* Totals overview */}
+        <div className="gradient-green" style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: "0.68rem", fontWeight: 700, opacity: 0.65, marginBottom: 12, letterSpacing: "0.05em" }}>
+            إجمالي {area?.name || "المنطقة"} — {fmtMonth(monthYear)}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, textAlign: "center" }}>
+            {[
+              { label: "الكفالات",  val: rows.filter(r=>r.included).reduce((s,r)=>s+r.newFixed,0) },
+              { label: "الزيادات",  val: rows.filter(r=>r.included).reduce((s,r)=>s+r.newExtras,0), gold: true },
+              { label: "الإجمالي", val: includedTotal },
+            ].map(item => (
+              <div key={item.label}>
+                <div style={{ fontSize: "0.68rem", opacity: 0.65, marginBottom: 4 }}>{item.label}</div>
+                <div style={{ fontSize: "1.2rem", fontWeight: 800, color: (item as any).gold ? "var(--gold-light)" : "inherit" }}>
+                  {fmt(item.val)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <button onClick={onNext} className="btn btn-primary btn-lg" style={{ width: "100%" }}>
+          متابعة: الصدقات ←
+        </button>
+      </div>
+    );
+  }
 
   const includedRows = rows.filter(r => r.included);
   const grandFixed   = includedRows.reduce((s, r) => s + r.newFixed, 0);
