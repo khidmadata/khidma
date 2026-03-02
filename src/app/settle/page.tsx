@@ -660,11 +660,6 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
           : "")
       : `${recipientName}${recipientDetail ? ` — ${recipientDetail}` : ""}`;
 
-    // Resolve operator name → UUID (approved_by is a uuid FK column)
-    const approvedById = receivedBy
-      ? (operators.find(o => o.name === receivedBy)?.id || null)
-      : null;
-
     const { data, error } = await supabase.from("sadaqat_pool").insert({
       transaction_type:        "outflow",
       amount:                  Number(amount),
@@ -673,7 +668,7 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
       destination_description: description || reason || null,
       month_year:              monthYear,
       reason:                  reason || null,
-      approved_by:             approvedById,
+      approved_by:             receivedBy || null,   // now a UUID from the select
     }).select("*").single();
 
     if (!error && data) setEntries(prev => [...prev, data]);
@@ -839,11 +834,10 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
           </div>
           <div>
             <label className="field-label">استلمه</label>
-            <input value={receivedBy} onChange={e => setReceivedBy(e.target.value)}
-              className="input-field" list="ops-list" placeholder="من استلم المبلغ..." />
-            <datalist id="ops-list">
-              {operators.map(o => <option key={o.id} value={o.name} />)}
-            </datalist>
+            <select value={receivedBy} onChange={e => setReceivedBy(e.target.value)} className="select-field">
+              <option value="">— اختر المسئول —</option>
+              {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
           </div>
         </div>
 
