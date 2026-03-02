@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { Printer, Filter } from "lucide-react";
+import { ArrowRight, CheckCircle, Circle, ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const fmt = (n: number) => n.toLocaleString("en");
@@ -18,10 +17,6 @@ const MONTHS_AR: Record<string, string> = {
 function fmtMonth(m: string) {
   const [y, mo] = m.split("-");
   return `${MONTHS_AR[mo] || mo} ${y}`;
-}
-
-function toArabicNumerals(str: string) {
-  return str.replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩"[parseInt(d)]);
 }
 
 function genMonths() {
@@ -41,332 +36,449 @@ function currentMonth() {
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type SponsorRow = {
-  sponsor_id: string;
+type PendingSponsor = {
+  sponsor_id:   string;
   sponsor_name: string;
-  phone: string | null;
-  fixed:     number;  // sum of active sponsorships
-  extras:    number;  // one_time_extra for this month
-  obligation: number; // fixed + extras
-  collected:  number; // from collections table
-  outstanding: number; // obligation - collected
-  received_by: string; // operator name
-  status: "paid" | "partial" | "unpaid";
+  phone:        string | null;
+  obligation:   number;
+  collected:    number;
+  outstanding:  number;
+  cases:        { child_name: string; guardian_name: string | null }[];
+  checked:      boolean;
+  received_by:  string; // operator UUID
 };
 
-type FilterStatus = "all" | "unpaid" | "partial" | "paid";
+type Operator = { id: string; name: string };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function TahseelPage() {
   const monthOptions = useMemo(genMonths, []);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>("all");
-  const [rows, setRows] = useState<SponsorRow[]>([]);
-  const [opMap, setOpMap] = useState<Record<string, string>>({});
+  const [sponsors, setSponsors] = useState<PendingSponsor[]>([]);
+  const [operators, setOperators] = useState<Operator[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [confirmMode, setConfirmMode] = useState(false);
+  const [savedOk, setSavedOk] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [globalReceivedBy, setGlobalReceivedBy] = useState("");
 
   useEffect(() => {
     load(selectedMonth);
+    setConfirmMode(false);
+    setSavedOk(false);
   }, [selectedMonth]);
 
   async function load(month: string) {
     setLoading(true);
 
     const [spRes, adjRes, colRes, opRes] = await Promise.all([
-      // All active sponsorships with sponsor info
       supabase.from("sponsorships")
-        .select("sponsor_id, fixed_amount, sponsors(name, phone)")
+        .select("sponsor_id, fixed_amount, sponsors(name, phone), cases(child_name, guardian_name)")
         .eq("status", "active"),
-      // One-time extras for this month
       supabase.from("monthly_adjustments")
         .select("sponsor_id, amount")
         .eq("month_year", month)
         .eq("adjustment_type", "one_time_extra"),
-      // Collections for this month
       supabase.from("collections")
-        .select("sponsor_id, amount, received_by_operator_id")
+        .select("sponsor_id, amount")
         .eq("month_year", month),
-      // Operators
-      supabase.from("operators").select("id, name"),
+      supabase.from("operators").select("id, name").neq("name", "شريف"),
     ]);
 
     const sps: any[]  = spRes.data  || [];
     const adjs: any[] = adjRes.data || [];
     const cols: any[] = colRes.data || [];
-    const ops: any[]  = opRes.data  || [];
-
-    const oMap: Record<string, string> = {};
-    ops.forEach((o: any) => { oMap[o.id] = o.name; });
-    setOpMap(oMap);
+    setOperators(opRes.data || []);
 
     // Group sponsorships by sponsor_id
-    const sponsorFixed: Record<string, { name: string; phone: string | null; fixed: number }> = {};
+    const map: Record<string, {
+      name: string; phone: string | null;
+      fixed: number; extras: number; collected: number;
+      cases: { child_name: string; guardian_name: string | null }[];
+    }> = {};
+
     for (const sp of sps) {
       const id = sp.sponsor_id;
-      if (!sponsorFixed[id]) {
-        sponsorFixed[id] = {
-          name:  (sp.sponsors as any)?.name  || "—",
-          phone: (sp.sponsors as any)?.phone || null,
-          fixed: 0,
+      if (!map[id]) {
+        map[id] = {
+          name:      (sp.sponsors as any)?.name  || "—",
+          phone:     (sp.sponsors as any)?.phone || null,
+          fixed: 0, extras: 0, collected: 0,
+          cases: [],
         };
       }
-      sponsorFixed[id].fixed += Number(sp.fixed_amount);
+      map[id].fixed += Number(sp.fixed_amount);
+      if (sp.cases) {
+        map[id].cases.push({
+          child_name:    (sp.cases as any).child_name,
+          guardian_name: (sp.cases as any).guardian_name,
+        });
+      }
     }
 
-    // Group extras by sponsor_id
-    const sponsorExtras: Record<string, number> = {};
     for (const adj of adjs) {
-      sponsorExtras[adj.sponsor_id] = (sponsorExtras[adj.sponsor_id] || 0) + Number(adj.amount);
+      if (map[adj.sponsor_id]) map[adj.sponsor_id].extras += Number(adj.amount);
     }
-
-    // Group collections by sponsor_id
-    const sponsorCollected: Record<string, { amount: number; received_by: string }> = {};
     for (const col of cols) {
-      const existing = sponsorCollected[col.sponsor_id];
-      const amt = Number(col.amount);
-      if (!existing) {
-        sponsorCollected[col.sponsor_id] = {
-          amount: amt,
-          received_by: oMap[col.received_by_operator_id] || "",
-        };
-      } else {
-        existing.amount += amt;
-        if (!existing.received_by && col.received_by_operator_id) {
-          existing.received_by = oMap[col.received_by_operator_id] || "";
-        }
-      }
+      if (map[col.sponsor_id]) map[col.sponsor_id].collected += Number(col.amount);
     }
 
-    // Build rows (only sponsors with active sponsorships)
-    const result: SponsorRow[] = Object.entries(sponsorFixed).map(([sponsorId, data]) => {
-      const extras    = sponsorExtras[sponsorId] || 0;
-      const obligation = data.fixed + extras;
-      const collected  = sponsorCollected[sponsorId]?.amount || 0;
-      const outstanding = Math.max(0, obligation - collected);
-      const status: "paid" | "partial" | "unpaid" =
-        collected >= obligation && obligation > 0 ? "paid" :
-        collected > 0 ? "partial" : "unpaid";
-      return {
-        sponsor_id:   sponsorId,
-        sponsor_name: data.name,
-        phone:        data.phone,
-        fixed:        data.fixed,
-        extras,
-        obligation,
-        collected,
-        outstanding,
-        received_by:  sponsorCollected[sponsorId]?.received_by || "",
-        status,
-      };
-    }).sort((a, b) => {
-      // Sort: unpaid first, then partial, then paid; within each group by name
-      const order = { unpaid: 0, partial: 1, paid: 2 };
-      if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
-      return a.sponsor_name.localeCompare(b.sponsor_name, "ar");
-    });
+    // Build list: only those with outstanding > 0
+    const result: PendingSponsor[] = Object.entries(map)
+      .map(([id, d]) => {
+        const obligation  = d.fixed + d.extras;
+        const outstanding = Math.max(0, obligation - d.collected);
+        return {
+          sponsor_id:   id,
+          sponsor_name: d.name,
+          phone:        d.phone,
+          obligation,
+          collected:    d.collected,
+          outstanding,
+          cases:        d.cases,
+          checked:      false,
+          received_by:  "",
+        };
+      })
+      .filter(r => r.outstanding > 0)
+      .sort((a, b) => a.sponsor_name.localeCompare(b.sponsor_name, "ar"));
 
-    setRows(result);
+    setSponsors(result);
     setLoading(false);
   }
 
-  const filtered = useMemo(() => {
-    if (filterStatus === "all") return rows;
-    return rows.filter(r => r.status === filterStatus);
-  }, [rows, filterStatus]);
+  function toggleCheck(id: string) {
+    setSponsors(prev => prev.map(s =>
+      s.sponsor_id === id ? { ...s, checked: !s.checked } : s
+    ));
+  }
 
-  const totalObligation = rows.reduce((s, r) => s + r.obligation, 0);
-  const totalCollected  = rows.reduce((s, r) => s + r.collected,  0);
-  const totalOutstanding = rows.reduce((s, r) => s + r.outstanding, 0);
-  const unpaidCount  = rows.filter(r => r.status === "unpaid").length;
-  const partialCount = rows.filter(r => r.status === "partial").length;
+  function toggleAll(val: boolean) {
+    setSponsors(prev => prev.map(s => ({ ...s, checked: val })));
+  }
 
-  const statusColors = {
-    paid:    { bg: "var(--green-light)",  color: "var(--green)",  label: "مكتمل"   },
-    partial: { bg: "var(--amber-light)",  color: "var(--amber)",  label: "جزئي"    },
-    unpaid:  { bg: "var(--red-light)",    color: "var(--red)",    label: "لم يُحصَّل" },
-  };
+  // Apply global received_by to all checked rows when it changes
+  function applyGlobalReceiver(opId: string) {
+    setGlobalReceivedBy(opId);
+    setSponsors(prev => prev.map(s => s.checked ? { ...s, received_by: opId } : s));
+  }
 
+  const checkedSponsors = sponsors.filter(s => s.checked);
+  const allChecked = sponsors.length > 0 && sponsors.every(s => s.checked);
+
+  async function confirmAndSave() {
+    setSaving(true);
+    const errors: string[] = [];
+
+    for (const sp of checkedSponsors) {
+      // Delete existing collection for this sponsor+month (idempotent)
+      await supabase.from("collections").delete()
+        .eq("sponsor_id", sp.sponsor_id).eq("month_year", selectedMonth);
+
+      const { error } = await supabase.from("collections").insert({
+        sponsor_id:              sp.sponsor_id,
+        amount:                  sp.outstanding,
+        fixed_portion:           sp.outstanding,
+        extra_portion:           0,
+        sadaqat_portion:         0,
+        month_year:              selectedMonth,
+        received_by_operator_id: sp.received_by || null,
+        payment_method:          "cash",
+        status:                  "paid",
+      });
+      if (error) errors.push(`${sp.sponsor_name}: ${error.message}`);
+    }
+
+    setSaving(false);
+    if (errors.length) {
+      alert("حدثت أخطاء:\n" + errors.join("\n"));
+    } else {
+      setSavedOk(true);
+      // Reload to reflect saved state
+      await load(selectedMonth);
+      setConfirmMode(false);
+    }
+  }
+
+  // ── Confirmation screen ──
+  if (confirmMode) {
+    const opMap = Object.fromEntries(operators.map(o => [o.id, o.name]));
+    const byOp: Record<string, { name: string; total: number; sponsors: string[] }> = {};
+    const unassigned: { name: string; amount: number }[] = [];
+
+    for (const sp of checkedSponsors) {
+      if (sp.received_by) {
+        const opName = opMap[sp.received_by] || sp.received_by;
+        if (!byOp[sp.received_by]) byOp[sp.received_by] = { name: opName, total: 0, sponsors: [] };
+        byOp[sp.received_by].total += sp.outstanding;
+        byOp[sp.received_by].sponsors.push(`${sp.sponsor_name} — ${fmt(sp.outstanding)} ج`);
+      } else {
+        unassigned.push({ name: sp.sponsor_name, amount: sp.outstanding });
+      }
+    }
+
+    const grandTotal = checkedSponsors.reduce((s, r) => s + r.outstanding, 0);
+
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
+        <header className="app-header">
+          <button onClick={() => setConfirmMode(false)} className="btn btn-ghost btn-sm">
+            <ArrowRight size={18} />
+          </button>
+          <div style={{ flex: 1, paddingRight: 12 }}>
+            <div className="app-logo" style={{ fontSize: "1.1rem" }}>تأكيد التحصيل</div>
+          </div>
+        </header>
+
+        <main style={{ maxWidth: 600, margin: "0 auto", padding: "1.5rem 1rem 3rem" }}>
+          <p style={{ fontSize: "0.85rem", color: "var(--text-3)", marginBottom: 20 }}>
+            راجع التفاصيل قبل الحفظ — {fmtMonth(selectedMonth)}
+          </p>
+
+          {/* Per-operator breakdown */}
+          {Object.values(byOp).map(op => (
+            <div key={op.name} className="card" style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ fontWeight: 700, fontSize: "1rem" }}>{op.name}</span>
+                <span style={{ fontWeight: 800, color: "var(--green)", fontSize: "1.1rem" }}>{fmt(op.total)} ج</span>
+              </div>
+              <div style={{ display: "grid", gap: 5 }}>
+                {op.sponsors.map(s => (
+                  <div key={s} style={{ fontSize: "0.82rem", color: "var(--text-2)", padding: "4px 10px", background: "var(--cream)", borderRadius: 6 }}>
+                    {s}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {/* Unassigned */}
+          {unassigned.length > 0 && (
+            <div className="card" style={{ marginBottom: 12, border: "1.5px solid var(--amber)" }}>
+              <div style={{ fontWeight: 700, color: "var(--amber)", marginBottom: 8, fontSize: "0.9rem" }}>
+                بدون مستلم محدد ({unassigned.length})
+              </div>
+              {unassigned.map(u => (
+                <div key={u.name} style={{ fontSize: "0.82rem", color: "var(--text-2)", padding: "4px 10px", background: "var(--amber-light)", borderRadius: 6, marginBottom: 4 }}>
+                  {u.name} — {fmt(u.amount)} ج
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Grand total */}
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            background: "var(--green)", color: "white", borderRadius: "var(--radius)",
+            padding: "1rem 1.25rem", marginBottom: 24,
+          }}>
+            <span style={{ fontWeight: 700 }}>الإجمالي</span>
+            <span style={{ fontWeight: 800, fontSize: "1.3rem" }}>{fmt(grandTotal)} ج</span>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 }}>
+            <button onClick={() => setConfirmMode(false)} className="btn btn-secondary btn-lg">
+              ← تعديل
+            </button>
+            <button
+              onClick={confirmAndSave}
+              disabled={saving}
+              className="btn btn-primary btn-lg"
+            >
+              {saving ? "جاري الحفظ..." : "✓ تأكيد وحفظ"}
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // ── Main list ──
   return (
-    <>
-      {/* Print styles */}
-      <style>{`
-        @media print {
-          .no-print { display: none !important; }
-          body { background: white !important; padding: 0 !important; }
-          .print-wrap { padding: 12px !important; }
-          table { font-size: 10px !important; }
-          th, td { padding: 5px 7px !important; }
-        }
-        @page { size: A4 landscape; margin: 10mm; }
-      `}</style>
-
-      {/* Header */}
-      <header className="app-header no-print">
+    <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
+      <header className="app-header">
         <Link href="/" className="btn btn-ghost btn-sm">
           <ArrowRight size={18} />
         </Link>
         <div style={{ flex: 1, paddingRight: 12 }}>
           <div className="app-logo" style={{ fontSize: "1.1rem" }}>التحصيل</div>
         </div>
-        <button onClick={() => window.print()} className="btn btn-primary btn-sm" style={{ gap: 4 }}>
-          <Printer size={14} /> طباعة / PDF
-        </button>
+        <select
+          value={selectedMonth}
+          onChange={e => setSelectedMonth(e.target.value)}
+          className="select-field"
+          style={{ minWidth: 140, fontSize: "0.8rem", height: 38 }}
+        >
+          {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
       </header>
 
-      <div className="print-wrap" style={{ maxWidth: 1000, margin: "0 auto", padding: "1.25rem 1rem 3rem" }}>
+      <main style={{ maxWidth: 600, margin: "0 auto", padding: "1.25rem 1rem 3rem" }}>
 
-        {/* Month selector + filter */}
-        <div className="no-print" style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
-          <select
-            value={selectedMonth}
-            onChange={e => setSelectedMonth(e.target.value)}
-            className="select-field"
-            style={{ minWidth: 160 }}
-          >
-            {monthOptions.map(o => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-
-          <div style={{ display: "flex", gap: 6 }}>
-            {([
-              ["all",     "الكل"],
-              ["unpaid",  "لم يُحصَّل"],
-              ["partial", "جزئي"],
-              ["paid",    "مكتمل"],
-            ] as [FilterStatus, string][]).map(([v, lbl]) => (
-              <button
-                key={v}
-                onClick={() => setFilterStatus(v)}
-                className="btn btn-sm"
-                style={{
-                  background: filterStatus === v ? "var(--green)" : "var(--surface)",
-                  color:      filterStatus === v ? "white"        : "var(--text-2)",
-                  border:     filterStatus === v ? "none"         : "1.5px solid var(--border)",
-                  fontWeight: 600,
-                }}
-              >{lbl}</button>
-            ))}
+        {/* Success banner */}
+        {savedOk && (
+          <div style={{
+            display: "flex", gap: 10, alignItems: "center", marginBottom: 16,
+            background: "var(--green-light)", border: "1.5px solid var(--green)",
+            borderRadius: "var(--radius)", padding: "0.875rem 1rem",
+          }}>
+            <CheckCircle size={20} style={{ color: "var(--green)" }} />
+            <span style={{ fontWeight: 700, color: "var(--green)" }}>تم حفظ التحصيل بنجاح</span>
           </div>
-        </div>
+        )}
 
-        {/* Print title */}
-        <div style={{ textAlign: "center", marginBottom: 16 }}>
-          <div style={{ fontSize: "1.1rem", fontWeight: 800 }}>
-            كشف التحصيل — {fmtMonth(selectedMonth)}
-          </div>
-          <div style={{ fontSize: "0.75rem", color: "var(--text-3)", marginTop: 2 }}>
-            أُنتج بتاريخ {new Date().toLocaleDateString("ar-EG", { year: "numeric", month: "long", day: "numeric" })}
-          </div>
-        </div>
-
-        {/* Summary cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 }}>
-          {[
-            { label: "الإجمالي المطلوب", val: totalObligation, color: "var(--text-1)",  note: `${rows.length} كفيل` },
-            { label: "تم تحصيله",         val: totalCollected,  color: "var(--green)",   note: `${rows.filter(r=>r.status==="paid").length} مكتمل` },
-            { label: "المتبقي",           val: totalOutstanding, color: "var(--red)",     note: `${unpaidCount} لم يُحصَّل، ${partialCount} جزئي` },
-          ].map(item => (
-            <div key={item.label} className="card" style={{ textAlign: "center", padding: "1rem" }}>
-              <div style={{ fontSize: "0.72rem", color: "var(--text-3)", marginBottom: 6 }}>{item.label}</div>
-              <div style={{ fontSize: "1.4rem", fontWeight: 800, color: item.color }}>{fmt(item.val)}</div>
-              <div style={{ fontSize: "0.68rem", color: "var(--text-3)", marginTop: 4 }}>{item.note}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Table */}
         {loading ? (
           <div style={{ textAlign: "center", padding: "3rem", color: "var(--text-3)" }}>جاري التحميل...</div>
+        ) : sponsors.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "3rem", color: "var(--text-3)", background: "var(--surface)", borderRadius: "var(--radius)", border: "1.5px solid var(--border)" }}>
+            <CheckCircle size={40} style={{ color: "var(--green)", marginBottom: 10 }} />
+            <div style={{ fontWeight: 700, color: "var(--green)", fontSize: "1rem" }}>تم تحصيل الكل ✓</div>
+            <div style={{ fontSize: "0.82rem", marginTop: 6 }}>لا يوجد متأخرون في {fmtMonth(selectedMonth)}</div>
+          </div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
-              <thead>
-                <tr style={{ background: "#F0EDE7" }}>
-                  <th style={{ padding: "10px 12px", textAlign: "right",   fontWeight: 700, color: "var(--text-2)" }}>الكفيل</th>
-                  <th style={{ padding: "10px 10px", textAlign: "center",  fontWeight: 700, color: "var(--text-2)" }}>الكفالة</th>
-                  <th style={{ padding: "10px 10px", textAlign: "center",  fontWeight: 700, color: "var(--text-2)" }}>الزيادات</th>
-                  <th style={{ padding: "10px 10px", textAlign: "center",  fontWeight: 700, color: "var(--text-2)", background: "#EDE8E1" }}>المطلوب</th>
-                  <th style={{ padding: "10px 10px", textAlign: "center",  fontWeight: 700, color: "var(--text-2)" }}>المحصَّل</th>
-                  <th style={{ padding: "10px 10px", textAlign: "center",  fontWeight: 700, color: "var(--text-2)" }}>المتبقي</th>
-                  <th style={{ padding: "10px 10px", textAlign: "center",  fontWeight: 700, color: "var(--text-2)" }}>استلمه</th>
-                  <th style={{ padding: "10px 10px", textAlign: "center",  fontWeight: 700, color: "var(--text-2)" }}>الحالة</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r, i) => {
-                  const sc = statusColors[r.status];
-                  return (
-                    <tr key={r.sponsor_id} style={{ background: i % 2 === 0 ? "white" : "var(--cream)", borderBottom: "1px solid var(--border)" }}>
-                      <td style={{ padding: "9px 12px" }}>
-                        <div style={{ fontWeight: 700, color: "var(--text-1)" }}>{r.sponsor_name}</div>
-                        {r.phone && <div style={{ fontSize: "0.7rem", color: "var(--text-3)" }}>{r.phone}</div>}
-                      </td>
-                      <td style={{ padding: "9px 10px", textAlign: "center", color: "var(--text-2)" }}>{fmt(r.fixed)}</td>
-                      <td style={{ padding: "9px 10px", textAlign: "center", color: r.extras > 0 ? "var(--amber)" : "var(--text-3)" }}>
-                        {r.extras > 0 ? `+${fmt(r.extras)}` : "—"}
-                      </td>
-                      <td style={{ padding: "9px 10px", textAlign: "center", fontWeight: 700, color: "var(--text-1)", background: i % 2 === 0 ? "#F4F0EA" : "#EDE8E1" }}>
-                        {fmt(r.obligation)}
-                      </td>
-                      <td style={{ padding: "9px 10px", textAlign: "center", color: r.collected > 0 ? "var(--green)" : "var(--text-3)", fontWeight: r.collected > 0 ? 700 : 400 }}>
-                        {r.collected > 0 ? fmt(r.collected) : "—"}
-                      </td>
-                      <td style={{ padding: "9px 10px", textAlign: "center", color: r.outstanding > 0 ? "var(--red)" : "var(--text-3)", fontWeight: r.outstanding > 0 ? 700 : 400 }}>
-                        {r.outstanding > 0 ? fmt(r.outstanding) : "—"}
-                      </td>
-                      <td style={{ padding: "9px 10px", textAlign: "center", color: "var(--text-2)", fontSize: "0.78rem" }}>
-                        {r.received_by || "—"}
-                      </td>
-                      <td style={{ padding: "9px 10px", textAlign: "center" }}>
-                        <span style={{
-                          display: "inline-block",
-                          padding: "3px 10px", borderRadius: 100,
-                          fontSize: "0.72rem", fontWeight: 700,
-                          background: sc.bg, color: sc.color,
-                        }}>
-                          {sc.label}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr style={{ background: "#E4DDD3", fontWeight: 800 }}>
-                  <td style={{ padding: "10px 12px", color: "var(--text-1)" }}>
-                    الإجمالي ({filtered.length} كفيل)
-                  </td>
-                  <td style={{ padding: "10px 10px", textAlign: "center" }}>
-                    {fmt(filtered.reduce((s, r) => s + r.fixed, 0))}
-                  </td>
-                  <td style={{ padding: "10px 10px", textAlign: "center", color: "var(--amber)" }}>
-                    {filtered.reduce((s,r)=>s+r.extras,0) > 0
-                      ? `+${fmt(filtered.reduce((s,r)=>s+r.extras,0))}`
-                      : "—"}
-                  </td>
-                  <td style={{ padding: "10px 10px", textAlign: "center", color: "var(--text-1)", background: "#D8D2C8" }}>
-                    {fmt(filtered.reduce((s, r) => s + r.obligation, 0))}
-                  </td>
-                  <td style={{ padding: "10px 10px", textAlign: "center", color: "var(--green)" }}>
-                    {fmt(filtered.reduce((s, r) => s + r.collected, 0))}
-                  </td>
-                  <td style={{ padding: "10px 10px", textAlign: "center", color: "var(--red)" }}>
-                    {fmt(filtered.reduce((s, r) => s + r.outstanding, 0))}
-                  </td>
-                  <td colSpan={2}></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
+          <>
+            {/* Summary bar */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+              <span style={{ fontSize: "0.85rem", color: "var(--text-2)", fontWeight: 600 }}>
+                {sponsors.length} كفيل لم يدفع
+              </span>
+              <span style={{ color: "var(--text-3)" }}>·</span>
+              <span style={{ fontSize: "0.85rem", color: "var(--red)", fontWeight: 700 }}>
+                {fmt(sponsors.reduce((s, r) => s + r.outstanding, 0))} ج متبقي
+              </span>
+              {checkedSponsors.length > 0 && (
+                <>
+                  <span style={{ color: "var(--text-3)" }}>·</span>
+                  <span style={{ fontSize: "0.82rem", color: "var(--green)", fontWeight: 700 }}>
+                    {checkedSponsors.length} محدد ({fmt(checkedSponsors.reduce((s,r)=>s+r.outstanding,0))} ج)
+                  </span>
+                </>
+              )}
+            </div>
 
-        {filtered.length === 0 && !loading && (
-          <div style={{ textAlign: "center", padding: "2rem", color: "var(--text-3)", fontSize: "0.875rem" }}>
-            لا توجد بيانات للعرض
-          </div>
+            {/* Select all + global received-by */}
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "0.85rem", fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={allChecked}
+                  onChange={e => toggleAll(e.target.checked)}
+                  style={{ width: 16, height: 16, cursor: "pointer" }}
+                />
+                تحديد الكل
+              </label>
+              {checkedSponsors.length > 0 && (
+                <select
+                  value={globalReceivedBy}
+                  onChange={e => applyGlobalReceiver(e.target.value)}
+                  className="select-field"
+                  style={{ fontSize: "0.82rem", height: 34, flex: 1, minWidth: 160 }}
+                >
+                  <option value="">استلمه: — اختر —</option>
+                  {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              )}
+            </div>
+
+            {/* Sponsor list */}
+            <div style={{ display: "grid", gap: 8, marginBottom: 20 }}>
+              {sponsors.map(sp => (
+                <div
+                  key={sp.sponsor_id}
+                  className="card"
+                  style={{
+                    padding: "0.75rem 1rem",
+                    border: sp.checked ? "2px solid var(--green)" : "1.5px solid var(--border)",
+                    background: sp.checked ? "var(--green-light)" : "var(--surface)",
+                    transition: "all 0.12s",
+                  }}
+                >
+                  {/* Main row */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button
+                      onClick={() => toggleCheck(sp.sponsor_id)}
+                      style={{ background: "none", border: "none", cursor: "pointer", padding: 0, flexShrink: 0, color: sp.checked ? "var(--green)" : "var(--text-3)" }}
+                    >
+                      {sp.checked ? <CheckCircle size={22} /> : <Circle size={22} />}
+                    </button>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: "0.95rem", color: "var(--text-1)" }}>
+                        {sp.sponsor_name}
+                      </div>
+                      {sp.phone && (
+                        <div style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{sp.phone}</div>
+                      )}
+                    </div>
+
+                    <div style={{ textAlign: "left", flexShrink: 0 }}>
+                      <div style={{ fontWeight: 800, fontSize: "1.05rem", color: sp.checked ? "var(--green)" : "var(--red)" }}>
+                        {fmt(sp.outstanding)} ج
+                      </div>
+                      {sp.collected > 0 && (
+                        <div style={{ fontSize: "0.68rem", color: "var(--text-3)" }}>
+                          دفع {fmt(sp.collected)} ج من {fmt(sp.obligation)} ج
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => setExpandedId(expandedId === sp.sponsor_id ? null : sp.sponsor_id)}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-3)", padding: "0 2px", flexShrink: 0 }}
+                    >
+                      {expandedId === sp.sponsor_id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    </button>
+                  </div>
+
+                  {/* Expanded: cases + per-row received_by */}
+                  {expandedId === sp.sponsor_id && (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+                      {sp.cases.length > 0 && (
+                        <div style={{ marginBottom: 8 }}>
+                          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)", marginBottom: 4 }}>الحالات المكفولة</div>
+                          {sp.cases.map((c, i) => (
+                            <div key={i} style={{ fontSize: "0.8rem", color: "var(--text-2)", padding: "3px 8px" }}>
+                              • {c.child_name}{c.guardian_name ? ` (${c.guardian_name})` : ""}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {sp.checked && (
+                        <div>
+                          <label style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)", display: "block", marginBottom: 4 }}>استلمه</label>
+                          <select
+                            value={sp.received_by}
+                            onChange={e => setSponsors(prev => prev.map(s => s.sponsor_id === sp.sponsor_id ? { ...s, received_by: e.target.value } : s))}
+                            className="select-field"
+                            style={{ fontSize: "0.82rem", height: 34 }}
+                          >
+                            <option value="">— اختر —</option>
+                            {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Action button */}
+            {checkedSponsors.length > 0 && (
+              <div style={{ position: "sticky", bottom: 80, zIndex: 10 }}>
+                <button
+                  onClick={() => setConfirmMode(true)}
+                  className="btn btn-primary btn-lg"
+                  style={{ width: "100%", boxShadow: "0 4px 20px rgba(27,107,67,0.35)" }}
+                >
+                  تسجيل تحصيل {checkedSponsors.length} كفيل ({fmt(checkedSponsors.reduce((s,r)=>s+r.outstanding,0))} ج) →
+                </button>
+              </div>
+            )}
+          </>
         )}
-      </div>
-    </>
+      </main>
+    </div>
   );
 }
