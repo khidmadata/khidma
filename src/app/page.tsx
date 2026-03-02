@@ -199,13 +199,24 @@ export default function Home() {
     };
   }).filter(s => s.obligation > 0), [sponsors, sponsorships, opMap, ptMap, collMap]);
 
-  // Financial totals
+  // Financial totals — current sponsorships (baseline / "all time" mode)
   const totalObligation = sponsorData.reduce((s, sp) => s + sp.obligation, 0);
   const totalCollected  = monthCollections.reduce((s, c) => s + c.total, 0);
-  // Collection tracking starts March 2026. For all earlier months treat as 100% collected.
+
+  // Historical disbursement totals for the selected month
+  const monthFixed  = monthDisbursements.reduce((s, d) => s + Number(d.fixed_total),  0);
+  const monthExtras = monthDisbursements.reduce((s, d) => s + Number(d.extras_total), 0);
+  const monthTotal  = monthFixed + monthExtras;
+
+  // For a specific month: use actual historical disbursement as obligation (if data exists)
+  const displayObligation = (selectedMonth !== "all" && monthFixed > 0)
+    ? monthFixed
+    : totalObligation;
+
+  // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
   const COLLECTION_START = "2026-03";
-  const effectiveCollected = (selectedMonth !== "all" && selectedMonth < COLLECTION_START)
-    ? totalObligation
+  const displayCollected = (selectedMonth !== "all" && selectedMonth < COLLECTION_START)
+    ? displayObligation   // 100% — what was sent that month
     : totalCollected;
 
   const filteredSadaqat = selectedMonth === "all" ? sadaqat : sadaqat.filter(s => s.month_year === selectedMonth);
@@ -252,6 +263,10 @@ export default function Home() {
   }, [selectedMonth, monthDisbursements, areaBreakdown]);
 
   const paidCount = sponsorData.filter(s => s.paid >= s.obligation && s.obligation > 0).length;
+  // For historical pre-March months assume all sponsors paid (100% collected)
+  const effectivePaidCount = (selectedMonth !== "all" && selectedMonth < COLLECTION_START && monthFixed > 0)
+    ? sponsorData.length
+    : paidCount;
 
   const TABS = [
     { id: "overview",   label: "نظرة عامة",        icon: TrendingUp   },
@@ -319,10 +334,10 @@ export default function Home() {
 
       {/* ── Content ── */}
       <main style={{ maxWidth: 1060, margin: "0 auto", padding: "1.5rem 1rem" }}>
-        {tab === "overview"  && <OverviewTab  sponsorData={sponsorData} totalObligation={totalObligation} totalCollected={effectiveCollected} paidCount={paidCount} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} selectedMonth={selectedMonth} />}
+        {tab === "overview"  && <OverviewTab  sponsorData={sponsorData} totalObligation={displayObligation} totalCollected={displayCollected} paidCount={effectivePaidCount} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} selectedMonth={selectedMonth} />}
         {tab === "sponsors"  && <SponsorsTab  sponsorData={sponsorData} advances={advances} selectedMonth={selectedMonth} />}
         {tab === "sadaqat"   && <SadaqatTab   sadaqat={sadaqat} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} selectedMonth={selectedMonth} />}
-        {tab === "locations" && <LocationsTab areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} totalObligation={totalObligation} selectedMonth={selectedMonth} />}
+        {tab === "locations" && <LocationsTab areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} totalObligation={displayObligation} selectedMonth={selectedMonth} />}
       </main>
 
       <footer style={{ textAlign: "center", padding: "1.5rem", fontSize: "0.72rem", color: "var(--text-3)", borderTop: "1px solid var(--border-light)" }}>
