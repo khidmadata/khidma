@@ -40,12 +40,15 @@ type PendingSponsor = {
   sponsor_id:   string;
   sponsor_name: string;
   phone:        string | null;
-  obligation:   number;
-  collected:    number;
-  outstanding:  number;
+  fixed:        number;   // sum of fixed_amount across all active sponsorships
+  extras:       number;   // sum of one_time_extra adjustments this month
+  obligation:   number;   // fixed + extras
+  collected:    number;   // already paid this month
+  outstanding:  number;   // obligation - collected
   cases:        { child_name: string; guardian_name: string | null }[];
   checked:      boolean;
-  received_by:  string; // operator UUID
+  amount:       number;   // amount to record — editable, defaults to outstanding
+  received_by:  string;   // operator UUID
 };
 
 type Operator = { id: string; name: string };
@@ -76,6 +79,7 @@ export default function TahseelPage() {
       supabase.from("sponsorships")
         .select("sponsor_id, fixed_amount, sponsors(name, phone), cases(child_name, guardian_name)")
         .eq("status", "active"),
+      // Read one_time_extra adjustments from تسوية الشهر
       supabase.from("monthly_adjustments")
         .select("sponsor_id, amount")
         .eq("month_year", month)
@@ -102,8 +106,8 @@ export default function TahseelPage() {
       const id = sp.sponsor_id;
       if (!map[id]) {
         map[id] = {
-          name:      (sp.sponsors as any)?.name  || "—",
-          phone:     (sp.sponsors as any)?.phone || null,
+          name:  (sp.sponsors as any)?.name  || "—",
+          phone: (sp.sponsors as any)?.phone || null,
           fixed: 0, extras: 0, collected: 0,
           cases: [],
         };
@@ -117,6 +121,7 @@ export default function TahseelPage() {
       }
     }
 
+    // Add extras from monthly_adjustments (logged via تسوية)
     for (const adj of adjs) {
       if (map[adj.sponsor_id]) map[adj.sponsor_id].extras += Number(adj.amount);
     }
@@ -133,11 +138,14 @@ export default function TahseelPage() {
           sponsor_id:   id,
           sponsor_name: d.name,
           phone:        d.phone,
+          fixed:        d.fixed,
+          extras:       d.extras,
           obligation,
           collected:    d.collected,
           outstanding,
           cases:        d.cases,
           checked:      false,
+          amount:       outstanding,  // editable — defaults to full outstanding
           received_by:  "",
         };
       })
@@ -158,10 +166,14 @@ export default function TahseelPage() {
     setSponsors(prev => prev.map(s => ({ ...s, checked: val })));
   }
 
-  // Apply global received_by to all checked rows when it changes
   function applyGlobalReceiver(opId: string) {
     setGlobalReceivedBy(opId);
     setSponsors(prev => prev.map(s => s.checked ? { ...s, received_by: opId } : s));
+  }
+
+  function setAmount(id: string, val: string) {
+    const n = Math.max(0, Number(val) || 0);
+    setSponsors(prev => prev.map(s => s.sponsor_id === id ? { ...s, amount: n } : s));
   }
 
   const checkedSponsors = sponsors.filter(s => s.checked);
@@ -172,15 +184,19 @@ export default function TahseelPage() {
     const errors: string[] = [];
 
     for (const sp of checkedSponsors) {
-      // Delete existing collection for this sponsor+month (idempotent)
       await supabase.from("collections").delete()
         .eq("sponsor_id", sp.sponsor_id).eq("month_year", selectedMonth);
 
+      const amount = sp.amount;
+      // Split: fixed portion first, then extras
+      const fixed_portion = Math.min(amount, sp.fixed);
+      const extra_portion = Math.max(0, amount - sp.fixed);
+
       const { error } = await supabase.from("collections").insert({
         sponsor_id:              sp.sponsor_id,
-        amount:                  sp.outstanding,
-        fixed_portion:           sp.outstanding,
-        extra_portion:           0,
+        amount,
+        fixed_portion,
+        extra_portion,
         sadaqat_portion:         0,
         month_year:              selectedMonth,
         received_by_operator_id: sp.received_by || null,
@@ -195,7 +211,6 @@ export default function TahseelPage() {
       alert("حدثت أخطاء:\n" + errors.join("\n"));
     } else {
       setSavedOk(true);
-      // Reload to reflect saved state
       await load(selectedMonth);
       setConfirmMode(false);
     }
@@ -211,14 +226,14 @@ export default function TahseelPage() {
       if (sp.received_by) {
         const opName = opMap[sp.received_by] || sp.received_by;
         if (!byOp[sp.received_by]) byOp[sp.received_by] = { name: opName, total: 0, sponsors: [] };
-        byOp[sp.received_by].total += sp.outstanding;
-        byOp[sp.received_by].sponsors.push(`${sp.sponsor_name} — ${fmt(sp.outstanding)} ج`);
+        byOp[sp.received_by].total += sp.amount;
+        byOp[sp.received_by].sponsors.push(`${sp.sponsor_name} — ${fmt(sp.amount)} ج`);
       } else {
-        unassigned.push({ name: sp.sponsor_name, amount: sp.outstanding });
+        unassigned.push({ name: sp.sponsor_name, amount: sp.amount });
       }
     }
 
-    const grandTotal = checkedSponsors.reduce((s, r) => s + r.outstanding, 0);
+    const grandTotal = checkedSponsors.reduce((s, r) => s + r.amount, 0);
 
     return (
       <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
@@ -236,7 +251,6 @@ export default function TahseelPage() {
             راجع التفاصيل قبل الحفظ — {fmtMonth(selectedMonth)}
           </p>
 
-          {/* Per-operator breakdown */}
           {Object.values(byOp).map(op => (
             <div key={op.name} className="card" style={{ marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -253,21 +267,19 @@ export default function TahseelPage() {
             </div>
           ))}
 
-          {/* Unassigned */}
           {unassigned.length > 0 && (
             <div className="card" style={{ marginBottom: 12, border: "1.5px solid var(--amber)" }}>
               <div style={{ fontWeight: 700, color: "var(--amber)", marginBottom: 8, fontSize: "0.9rem" }}>
                 بدون مستلم محدد ({unassigned.length})
               </div>
               {unassigned.map(u => (
-                <div key={u.name} style={{ fontSize: "0.82rem", color: "var(--text-2)", padding: "4px 10px", background: "var(--amber-light)", borderRadius: 6, marginBottom: 4 }}>
+                <div key={u.name} style={{ fontSize: "0.82rem", color: "var(--text-2)", padding: "4px 10px", borderRadius: 6, marginBottom: 4 }}>
                   {u.name} — {fmt(u.amount)} ج
                 </div>
               ))}
             </div>
           )}
 
-          {/* Grand total */}
           <div style={{
             display: "flex", justifyContent: "space-between", alignItems: "center",
             background: "var(--green)", color: "white", borderRadius: "var(--radius)",
@@ -281,11 +293,7 @@ export default function TahseelPage() {
             <button onClick={() => setConfirmMode(false)} className="btn btn-secondary btn-lg">
               ← تعديل
             </button>
-            <button
-              onClick={confirmAndSave}
-              disabled={saving}
-              className="btn btn-primary btn-lg"
-            >
+            <button onClick={confirmAndSave} disabled={saving} className="btn btn-primary btn-lg">
               {saving ? "جاري الحفظ..." : "✓ تأكيد وحفظ"}
             </button>
           </div>
@@ -316,7 +324,6 @@ export default function TahseelPage() {
 
       <main style={{ maxWidth: 600, margin: "0 auto", padding: "1.25rem 1rem 3rem" }}>
 
-        {/* Success banner */}
         {savedOk && (
           <div style={{
             display: "flex", gap: 10, alignItems: "center", marginBottom: 16,
@@ -351,7 +358,7 @@ export default function TahseelPage() {
                 <>
                   <span style={{ color: "var(--text-3)" }}>·</span>
                   <span style={{ fontSize: "0.82rem", color: "var(--green)", fontWeight: 700 }}>
-                    {checkedSponsors.length} محدد ({fmt(checkedSponsors.reduce((s,r)=>s+r.outstanding,0))} ج)
+                    {checkedSponsors.length} محدد ({fmt(checkedSponsors.reduce((s,r)=>s+r.amount,0))} ج)
                   </span>
                 </>
               )}
@@ -375,7 +382,7 @@ export default function TahseelPage() {
                   className="select-field"
                   style={{ fontSize: "0.82rem", height: 34, flex: 1, minWidth: 160 }}
                 >
-                  <option value="">استلمه: — اختر —</option>
+                  <option value="">استلمه: — اختر للكل —</option>
                   {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                 </select>
               )}
@@ -410,6 +417,12 @@ export default function TahseelPage() {
                       {sp.phone && (
                         <div style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{sp.phone}</div>
                       )}
+                      {/* Show extras breakdown if there are extras this month */}
+                      {sp.extras > 0 && (
+                        <div style={{ fontSize: "0.72rem", color: "var(--indigo)", marginTop: 2 }}>
+                          كفالة {fmt(sp.fixed)} + زيادة {fmt(sp.extras)} ج
+                        </div>
+                      )}
                     </div>
 
                     <div style={{ textAlign: "left", flexShrink: 0 }}>
@@ -418,7 +431,7 @@ export default function TahseelPage() {
                       </div>
                       {sp.collected > 0 && (
                         <div style={{ fontSize: "0.68rem", color: "var(--text-3)" }}>
-                          دفع {fmt(sp.collected)} ج من {fmt(sp.obligation)} ج
+                          دفع {fmt(sp.collected)} من {fmt(sp.obligation)} ج
                         </div>
                       )}
                     </div>
@@ -431,11 +444,44 @@ export default function TahseelPage() {
                     </button>
                   </div>
 
-                  {/* Expanded: cases + per-row received_by */}
+                  {/* When checked: amount input + received_by inline */}
+                  {sp.checked && (
+                    <div style={{ display: "flex", gap: 8, marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--text-3)", display: "block", marginBottom: 3 }}>
+                          المبلغ المحصل (ج)
+                        </label>
+                        <input
+                          type="number"
+                          value={sp.amount || ""}
+                          onChange={e => setAmount(sp.sponsor_id, e.target.value)}
+                          min={0}
+                          className="input-field"
+                          style={{ fontSize: "0.9rem", padding: "5px 10px", height: 36 }}
+                        />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--text-3)", display: "block", marginBottom: 3 }}>
+                          استلمه
+                        </label>
+                        <select
+                          value={sp.received_by}
+                          onChange={e => setSponsors(prev => prev.map(s => s.sponsor_id === sp.sponsor_id ? { ...s, received_by: e.target.value } : s))}
+                          className="select-field"
+                          style={{ fontSize: "0.82rem", height: 36 }}
+                        >
+                          <option value="">— اختر —</option>
+                          {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Expanded: cases list */}
                   {expandedId === sp.sponsor_id && (
                     <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
                       {sp.cases.length > 0 && (
-                        <div style={{ marginBottom: 8 }}>
+                        <div>
                           <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)", marginBottom: 4 }}>الحالات المكفولة</div>
                           {sp.cases.map((c, i) => (
                             <div key={i} style={{ fontSize: "0.8rem", color: "var(--text-2)", padding: "3px 8px" }}>
@@ -444,27 +490,13 @@ export default function TahseelPage() {
                           ))}
                         </div>
                       )}
-                      {sp.checked && (
-                        <div>
-                          <label style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)", display: "block", marginBottom: 4 }}>استلمه</label>
-                          <select
-                            value={sp.received_by}
-                            onChange={e => setSponsors(prev => prev.map(s => s.sponsor_id === sp.sponsor_id ? { ...s, received_by: e.target.value } : s))}
-                            className="select-field"
-                            style={{ fontSize: "0.82rem", height: 34 }}
-                          >
-                            <option value="">— اختر —</option>
-                            {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                          </select>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
               ))}
             </div>
 
-            {/* Action button */}
+            {/* Sticky action button */}
             {checkedSponsors.length > 0 && (
               <div style={{ position: "sticky", bottom: 80, zIndex: 10 }}>
                 <button
@@ -472,7 +504,7 @@ export default function TahseelPage() {
                   className="btn btn-primary btn-lg"
                   style={{ width: "100%", boxShadow: "0 4px 20px rgba(27,107,67,0.35)" }}
                 >
-                  تسجيل تحصيل {checkedSponsors.length} كفيل ({fmt(checkedSponsors.reduce((s,r)=>s+r.outstanding,0))} ج) →
+                  تسجيل تحصيل {checkedSponsors.length} كفيل ({fmt(checkedSponsors.reduce((s,r)=>s+r.amount,0))} ج) →
                 </button>
               </div>
             )}
