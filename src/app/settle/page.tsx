@@ -1178,30 +1178,34 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
 // ═══════════════════════════════════════════════════════════════════════════════
 // STEP "reports" — REPORTS
 // ═══════════════════════════════════════════════════════════════════════════════
-function StepReports({ monthYear, onBack }: { monthYear: string; onBack: () => void }) {
-  const [areas,   setAreas]   = useState<Area[]>([]);
-  const [loading, setLoading] = useState(true);
+function StepReports({ monthYear, area, onBack }: { monthYear: string; area: Area | null; onBack: () => void }) {
+  const [allAreas, setAllAreas] = useState<Area[]>([]);
+  const [loading,  setLoading]  = useState(!area); // skip loading if area is already known
 
   useEffect(() => {
+    if (area) return; // manual mode: need all areas
     supabase.from("areas").select("*").eq("is_active", true).then(({ data }) => {
-      setAreas(data || []);
+      setAllAreas(data || []);
       setLoading(false);
     });
-  }, []);
+  }, [area]);
 
   if (loading) return <Loader />;
+
+  // If an area was selected, show only that area; otherwise show all
+  const reportAreas: Area[] = area ? [area] : allAreas;
 
   return (
     <div>
       <h2 style={{ marginBottom: 4 }}>إصدار التقارير</h2>
       <p style={{ fontSize: "0.82rem", color: "var(--text-3)", marginBottom: 24, margin: "0 0 1.5rem" }}>
-        كشوف الصرف الشهرية لكل منطقة — {fmtMonth(monthYear)}
+        كشف الصرف — {area ? area.name : "كل المناطق"} — {fmtMonth(monthYear)}
       </p>
       <div style={{ display: "grid", gap: 12, marginBottom: 16 }}>
-        {areas.map(area => (
+        {reportAreas.map(a => (
           <button
-            key={area.id}
-            onClick={() => window.open(`/report?area=${area.id}&month=${monthYear}`, "_blank")}
+            key={a.id}
+            onClick={() => window.open(`/report?area=${a.id}&month=${monthYear}`, "_blank")}
             className="card"
             style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "1rem 1.25rem", border: "1.5px solid var(--border)", transition: "border-color 0.15s" }}
             onMouseEnter={e => (e.currentTarget.style.borderColor = "var(--green)")}
@@ -1209,7 +1213,7 @@ function StepReports({ monthYear, onBack }: { monthYear: string; onBack: () => v
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <FileText size={18} style={{ color: "var(--green)" }} />
-              <span style={{ fontWeight: 700 }}>كشف {area.name}</span>
+              <span style={{ fontWeight: 700 }}>كشف {a.name}</span>
             </div>
             <span style={{ fontSize: "0.8rem", color: "var(--text-3)" }}>فتح التقرير ↗</span>
           </button>
@@ -1337,6 +1341,7 @@ export default function SettlePage() {
         {pageStep === "reports" && (
           <StepReports
             monthYear={monthYear}
+            area={selectedArea}
             onBack={() => setPageStep("sadaqat")}
           />
         )}
