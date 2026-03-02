@@ -202,6 +202,11 @@ export default function Home() {
   // Financial totals
   const totalObligation = sponsorData.reduce((s, sp) => s + sp.obligation, 0);
   const totalCollected  = monthCollections.reduce((s, c) => s + c.total, 0);
+  // Collection tracking starts March 2026. For all earlier months treat as 100% collected.
+  const COLLECTION_START = "2026-03";
+  const effectiveCollected = (selectedMonth !== "all" && selectedMonth < COLLECTION_START)
+    ? totalObligation
+    : totalCollected;
 
   const filteredSadaqat = selectedMonth === "all" ? sadaqat : sadaqat.filter(s => s.month_year === selectedMonth);
   const sadaqatIn  = filteredSadaqat.filter(s => s.transaction_type === "inflow").reduce((s, e)  => s + Number(e.amount), 0);
@@ -314,7 +319,7 @@ export default function Home() {
 
       {/* ── Content ── */}
       <main style={{ maxWidth: 1060, margin: "0 auto", padding: "1.5rem 1rem" }}>
-        {tab === "overview"  && <OverviewTab  sponsorData={sponsorData} totalObligation={totalObligation} totalCollected={totalCollected} paidCount={paidCount} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} selectedMonth={selectedMonth} />}
+        {tab === "overview"  && <OverviewTab  sponsorData={sponsorData} totalObligation={totalObligation} totalCollected={effectiveCollected} paidCount={paidCount} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} selectedMonth={selectedMonth} />}
         {tab === "sponsors"  && <SponsorsTab  sponsorData={sponsorData} advances={advances} selectedMonth={selectedMonth} />}
         {tab === "sadaqat"   && <SadaqatTab   sadaqat={sadaqat} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} selectedMonth={selectedMonth} />}
         {tab === "locations" && <LocationsTab areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} totalObligation={totalObligation} selectedMonth={selectedMonth} />}
@@ -399,16 +404,26 @@ function OverviewTab({ sponsorData, totalObligation, totalCollected, paidCount, 
       <div className="card">
         <h3 style={{ marginBottom: 16, fontSize: "0.9rem" }}>🏘️ التوزيع حسب الموقع</h3>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
-          {Object.entries(areaBreakdown).map(([aId, data]: [string, any]) => (
-            <div key={aId} style={{ background: "var(--cream)", borderRadius: "var(--radius)", padding: "1rem", border: "1px solid var(--border-light)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>{areaMap[aId] || "—"}</span>
-                <span style={{ fontWeight: 800, color: "var(--indigo)", fontSize: "0.95rem" }}>{fmt(data.total)}</span>
+          {Object.entries(areaBreakdown).map(([aId, data]: [string, any]) => {
+            const cardEl = (
+              <div style={{ background: "var(--cream)", borderRadius: "var(--radius)", padding: "1rem", border: "1px solid var(--border-light)", cursor: isMonthly ? "pointer" : "default" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                  <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>{areaMap[aId] || "—"}</span>
+                  <span style={{ fontWeight: 800, color: "var(--indigo)", fontSize: "0.95rem" }}>{fmt(data.total)}</span>
+                </div>
+                <div style={{ fontSize: "0.72rem", color: "var(--text-3)", marginBottom: 4 }}>{data.cases} حالة</div>
+                {isMonthly && (
+                  <div style={{ fontSize: "0.7rem", color: "var(--amber)", marginBottom: 6 }}>
+                    كفالات {fmt(data.fixed)} + زيادات {fmt(data.extras)}
+                  </div>
+                )}
+                <ProgressBar value={data.total} max={totalDisb} color="var(--indigo)" />
               </div>
-              <div style={{ fontSize: "0.72rem", color: "var(--text-3)", marginBottom: 8 }}>{data.cases} حالة</div>
-              <ProgressBar value={data.total} max={totalDisb} color="var(--indigo)" />
-            </div>
-          ))}
+            );
+            return isMonthly
+              ? <Link key={aId} href={`/report?area=${aId}&month=${selectedMonth}`} style={{ textDecoration: "none", color: "inherit" }}>{cardEl}</Link>
+              : <div key={aId}>{cardEl}</div>;
+          })}
         </div>
       </div>
     </div>
@@ -682,17 +697,17 @@ function LocationsTab({ areaBreakdown, areaMap, totalObligation, selectedMonth }
       <div style={{ display: "grid", gap: 12 }}>
         {Object.entries(areaBreakdown).map(([aId, data]: [string, any]) => {
           const pct = totalAll > 0 ? (data.total / totalAll * 100).toFixed(1) : "0";
-          return (
-            <div className="card" key={aId}>
+          const cardEl = (
+            <div className="card" style={{ cursor: isHistorical ? "pointer" : "default" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <div>
                   <div style={{ fontWeight: 800, fontSize: "1.05rem", marginBottom: 2 }}>{areaMap[aId] || "غير محدد"}</div>
                   <div style={{ fontSize: "0.75rem", color: "var(--text-3)" }}>
                     {data.cases} حالة &nbsp;·&nbsp; {pct}٪ من الإجمالي
                   </div>
-                  {isHistorical && data.extras > 0 && (
-                    <div style={{ fontSize: "0.72rem", color: "var(--amber)", marginTop: 2 }}>
-                      كفالات {fmt(data.fixed)} + زيادات {fmt(data.extras)}
+                  {isHistorical && (
+                    <div style={{ fontSize: "0.72rem", color: "var(--amber)", marginTop: 4 }}>
+                      كفالات {fmt(data.fixed)} &nbsp;+&nbsp; زيادات {fmt(data.extras)} &nbsp;=&nbsp; <strong>{fmt(data.total)}</strong>
                     </div>
                   )}
                 </div>
@@ -704,6 +719,9 @@ function LocationsTab({ areaBreakdown, areaMap, totalObligation, selectedMonth }
               <ProgressBar value={data.total} max={totalAll} color="var(--indigo)" />
             </div>
           );
+          return isHistorical
+            ? <Link key={aId} href={`/report?area=${aId}&month=${selectedMonth}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>{cardEl}</Link>
+            : <div key={aId}>{cardEl}</div>;
         })}
       </div>
 
