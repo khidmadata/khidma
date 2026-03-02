@@ -30,6 +30,7 @@ type AdvancePayment = {
   sponsors: { name: string } | null; cases: { child_name: string } | null;
 };
 type MonthCollection = { sponsor_id: string; total: number };
+type DisbursementRow  = { area_id: string; fixed_total: number; extras_total: number };
 
 // ─── Utilities ───────────────────────────────────────────────────────────
 const fmt = (n: number) => n.toLocaleString("en");
@@ -117,8 +118,9 @@ export default function Home() {
   const [advances,     setAdvances]     = useState<AdvancePayment[]>([]);
 
   // Month-specific
-  const [monthCollections, setMonthCollections] = useState<MonthCollection[]>([]);
-  const [monthLoading,     setMonthLoading]     = useState(false);
+  const [monthCollections,   setMonthCollections]   = useState<MonthCollection[]>([]);
+  const [monthDisbursements, setMonthDisbursements] = useState<DisbursementRow[]>([]);
+  const [monthLoading,       setMonthLoading]       = useState(false);
 
   const monthOptions = useMemo(genMonthOptions, []);
 
@@ -148,20 +150,26 @@ export default function Home() {
     })();
   }, []);
 
-  // Month-specific collections
+  // Month-specific collections + disbursements
   useEffect(() => {
-    if (selectedMonth === "all") { setMonthCollections([]); return; }
+    if (selectedMonth === "all") {
+      setMonthCollections([]);
+      setMonthDisbursements([]);
+      return;
+    }
     setMonthLoading(true);
-    supabase.from("collections")
-      .select("sponsor_id, amount")
-      .eq("month_year", selectedMonth)
-      .eq("status", "confirmed")
-      .then(({ data }) => {
-        const grouped: Record<string, number> = {};
-        (data || []).forEach(c => { grouped[c.sponsor_id] = (grouped[c.sponsor_id] || 0) + Number(c.amount); });
-        setMonthCollections(Object.entries(grouped).map(([sponsor_id, total]) => ({ sponsor_id, total })));
-        setMonthLoading(false);
-      });
+    Promise.all([
+      supabase.from("collections").select("sponsor_id, amount")
+        .eq("month_year", selectedMonth).eq("status", "confirmed"),
+      supabase.from("disbursements").select("area_id, fixed_total, extras_total")
+        .eq("month_year", selectedMonth),
+    ]).then(([collRes, disbRes]) => {
+      const grouped: Record<string, number> = {};
+      (collRes.data || []).forEach(c => { grouped[c.sponsor_id] = (grouped[c.sponsor_id] || 0) + Number(c.amount); });
+      setMonthCollections(Object.entries(grouped).map(([sponsor_id, total]) => ({ sponsor_id, total })));
+      setMonthDisbursements((disbRes.data || []) as DisbursementRow[]);
+      setMonthLoading(false);
+    });
   }, [selectedMonth]);
 
   // Computed maps
@@ -203,7 +211,7 @@ export default function Home() {
     - sadaqat.filter(s => s.transaction_type === "outflow").reduce((s, e) => s + Number(e.amount), 0)
     : sadaqatIn - sadaqatOut;
 
-  // Area breakdown (always from sponsorships)
+  // Area breakdown from current sponsorships (always-current baseline)
   const areaBreakdown = useMemo(() => {
     const bd: Record<string, { cases: number; total: number }> = {};
     sponsorships.forEach(sh => {
@@ -215,6 +223,28 @@ export default function Home() {
     });
     return bd;
   }, [sponsorships]);
+
+  // Area breakdown for selected month — uses historical disbursements when available
+  const areaBreakdownForMonth = useMemo(() => {
+    if (selectedMonth !== "all" && monthDisbursements.length > 0) {
+      const bd: Record<string, { cases: number; total: number; fixed: number; extras: number }> = {};
+      monthDisbursements.forEach(d => {
+        bd[d.area_id] = {
+          cases: areaBreakdown[d.area_id]?.cases || 0,
+          fixed: Number(d.fixed_total),
+          extras: Number(d.extras_total),
+          total: Number(d.fixed_total) + Number(d.extras_total),
+        };
+      });
+      return bd;
+    }
+    // Fallback: current sponsorships (no extras breakdown for "all")
+    const bd: Record<string, { cases: number; total: number; fixed: number; extras: number }> = {};
+    Object.entries(areaBreakdown).forEach(([aId, data]) => {
+      bd[aId] = { cases: data.cases, total: data.total, fixed: data.total, extras: 0 };
+    });
+    return bd;
+  }, [selectedMonth, monthDisbursements, areaBreakdown]);
 
   const paidCount = sponsorData.filter(s => s.paid >= s.obligation && s.obligation > 0).length;
 
@@ -284,10 +314,10 @@ export default function Home() {
 
       {/* ── Content ── */}
       <main style={{ maxWidth: 1060, margin: "0 auto", padding: "1.5rem 1rem" }}>
-        {tab === "overview"  && <OverviewTab  sponsorData={sponsorData} totalObligation={totalObligation} totalCollected={totalCollected} paidCount={paidCount} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} areaBreakdown={areaBreakdown} areaMap={areaMap} selectedMonth={selectedMonth} />}
+        {tab === "overview"  && <OverviewTab  sponsorData={sponsorData} totalObligation={totalObligation} totalCollected={totalCollected} paidCount={paidCount} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} selectedMonth={selectedMonth} />}
         {tab === "sponsors"  && <SponsorsTab  sponsorData={sponsorData} advances={advances} selectedMonth={selectedMonth} />}
         {tab === "sadaqat"   && <SadaqatTab   sadaqat={sadaqat} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} selectedMonth={selectedMonth} />}
-        {tab === "locations" && <LocationsTab areaBreakdown={areaBreakdown} areaMap={areaMap} totalObligation={totalObligation} />}
+        {tab === "locations" && <LocationsTab areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} totalObligation={totalObligation} selectedMonth={selectedMonth} />}
       </main>
 
       <footer style={{ textAlign: "center", padding: "1.5rem", fontSize: "0.72rem", color: "var(--text-3)", borderTop: "1px solid var(--border-light)" }}>
@@ -617,26 +647,35 @@ function SadaqatTab({ sadaqat, sadaqatBal, sadaqatIn, sadaqatOut, selectedMonth 
 // ═══════════════════════════════════════════════════════════════════════
 // LOCATIONS TAB
 // ═══════════════════════════════════════════════════════════════════════
-function LocationsTab({ areaBreakdown, areaMap, totalObligation }: any) {
-  const totalAll = Object.values(areaBreakdown).reduce((s: number, a: any) => s + a.total, 0);
-  const totalCases = Object.values(areaBreakdown).reduce((s: number, a: any) => s + a.cases, 0);
+function LocationsTab({ areaBreakdown, areaMap, totalObligation, selectedMonth }: any) {
+  const totalFixed  = Object.values(areaBreakdown).reduce((s: number, a: any) => s + (a.fixed  || 0), 0);
+  const totalExtras = Object.values(areaBreakdown).reduce((s: number, a: any) => s + (a.extras || 0), 0);
+  const totalAll    = Object.values(areaBreakdown).reduce((s: number, a: any) => s + a.total, 0);
+  const totalCases  = Object.values(areaBreakdown).reduce((s: number, a: any) => s + a.cases, 0);
+  const isHistorical = selectedMonth !== "all";
 
   return (
     <div>
       <h2 style={{ marginBottom: 4 }}>التوزيع الشهري</h2>
       <p style={{ fontSize: "0.82rem", color: "var(--text-3)", marginBottom: 20, margin: "0 0 1.25rem" }}>
-        المبالغ المستحقة لكل موقع بناءً على الكفالات النشطة
+        {isHistorical ? `المبالغ المنصرفة فعلياً — ${fmtMonth(selectedMonth)}` : "المبالغ المستحقة لكل موقع بناءً على الكفالات النشطة"}
       </p>
 
       {/* Total */}
       <div className="gradient-indigo" style={{ marginBottom: 20, textAlign: "center" }}>
         <div style={{ fontSize: "0.7rem", fontWeight: 700, opacity: 0.65, letterSpacing: "0.06em", marginBottom: 8 }}>
-          إجمالي التوزيع الشهري
+          إجمالي التوزيع {isHistorical ? fmtMonth(selectedMonth) : "الشهري"}
         </div>
         <div style={{ fontSize: "2.5rem", fontWeight: 900, marginBottom: 4 }}>
           {fmt(totalAll)} <span style={{ fontSize: "1rem", opacity: 0.6 }}>ج.م</span>
         </div>
-        <div style={{ fontSize: "0.78rem", opacity: 0.6 }}>{totalCases} حالة نشطة</div>
+        {isHistorical && totalExtras > 0 ? (
+          <div style={{ fontSize: "0.78rem", opacity: 0.7 }}>
+            كفالات: {fmt(totalFixed)} &nbsp;+&nbsp; زيادات: {fmt(totalExtras)}
+          </div>
+        ) : (
+          <div style={{ fontSize: "0.78rem", opacity: 0.6 }}>{totalCases} حالة نشطة</div>
+        )}
       </div>
 
       {/* Area cards */}
@@ -651,6 +690,11 @@ function LocationsTab({ areaBreakdown, areaMap, totalObligation }: any) {
                   <div style={{ fontSize: "0.75rem", color: "var(--text-3)" }}>
                     {data.cases} حالة &nbsp;·&nbsp; {pct}٪ من الإجمالي
                   </div>
+                  {isHistorical && data.extras > 0 && (
+                    <div style={{ fontSize: "0.72rem", color: "var(--amber)", marginTop: 2 }}>
+                      كفالات {fmt(data.fixed)} + زيادات {fmt(data.extras)}
+                    </div>
+                  )}
                 </div>
                 <div style={{ textAlign: "left" }}>
                   <div style={{ fontSize: "1.5rem", fontWeight: 900, color: "var(--indigo)" }}>{fmt(data.total)}</div>
