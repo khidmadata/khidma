@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { ArrowRight, CheckCircle, Circle, ChevronDown, ChevronUp } from "lucide-react";
+import { LayoutDashboard, CheckCircle, Circle, ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -238,8 +238,9 @@ export default function TahseelPage() {
     return (
       <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
         <header className="app-header">
-          <button onClick={() => setConfirmMode(false)} className="btn btn-ghost btn-sm">
-            <ArrowRight size={18} />
+          <button onClick={() => setConfirmMode(false)} className="btn btn-ghost btn-sm" style={{ gap: 5 }}>
+            <LayoutDashboard size={16} />
+            <span style={{ fontSize: "0.78rem" }}>رجوع</span>
           </button>
           <div style={{ flex: 1, paddingRight: 12 }}>
             <div className="app-logo" style={{ fontSize: "1.1rem" }}>تأكيد التحصيل</div>
@@ -306,8 +307,9 @@ export default function TahseelPage() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
       <header className="app-header">
-        <Link href="/" className="btn btn-ghost btn-sm">
-          <ArrowRight size={18} />
+        <Link href="/" className="btn btn-ghost btn-sm" style={{ gap: 5 }}>
+          <LayoutDashboard size={16} />
+          <span style={{ fontSize: "0.78rem" }}>الرئيسية</span>
         </Link>
         <div style={{ flex: 1, paddingRight: 12 }}>
           <div className="app-logo" style={{ fontSize: "1.1rem" }}>التحصيل</div>
@@ -315,8 +317,7 @@ export default function TahseelPage() {
         <select
           value={selectedMonth}
           onChange={e => setSelectedMonth(e.target.value)}
-          className="select-field"
-          style={{ minWidth: 140, fontSize: "0.8rem", height: 38 }}
+          style={{ width: "auto", minWidth: 120, maxWidth: 160, fontSize: "0.8rem", height: 36, padding: "0 0.6rem", border: "1.5px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)", color: "var(--text-1)", cursor: "pointer" }}
         >
           {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { ArrowRight, UserPlus, Heart, CheckCircle, Loader2 } from "lucide-react";
+import { LayoutDashboard, UserPlus, Heart, CheckCircle, Loader2 } from "lucide-react";
 import Link from "next/link";
 
 type Area     = { id: string; name: string };
@@ -36,8 +36,9 @@ export default function RegisterPage() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
       <header className="app-header">
-        <Link href="/" className="btn btn-ghost btn-sm" style={{ gap: 4 }}>
-          <ArrowRight size={18} />
+        <Link href="/" className="btn btn-ghost btn-sm" style={{ gap: 5 }}>
+          <LayoutDashboard size={16} />
+          <span style={{ fontSize: "0.78rem" }}>الرئيسية</span>
         </Link>
         <div style={{ flex: 1, paddingRight: 12 }}>
           <div className="app-logo" style={{ fontSize: "1.1rem" }}>تسجيل جديد</div>

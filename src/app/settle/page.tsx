@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-  ArrowRight, Check, Trash2, CheckCircle, Circle,
+  LayoutDashboard, Check, Trash2, CheckCircle, Circle,
   FileText, AlertCircle, Pencil, X, Plus, MapPin,
 } from "lucide-react";
 import Link from "next/link";
@@ -1373,8 +1373,9 @@ export default function SettlePage() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
       <header className="app-header">
-        <Link href="/" className="btn btn-ghost btn-sm" style={{ gap: 4 }}>
-          <ArrowRight size={18} />
+        <Link href="/" className="btn btn-ghost btn-sm" style={{ gap: 5 }}>
+          <LayoutDashboard size={16} />
+          <span style={{ fontSize: "0.78rem" }}>الرئيسية</span>
         </Link>
         <div style={{ flex: 1, paddingRight: 12 }}>
           <div className="app-logo" style={{ fontSize: "1.1rem" }}>تسوية الشهر</div>
