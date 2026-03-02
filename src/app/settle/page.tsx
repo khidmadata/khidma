@@ -647,6 +647,8 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
     return list.slice(0, 25);
   }, [cases, caseSearch]);
 
+  const opMap = useMemo(() => Object.fromEntries(operators.map(o => [o.id, o.name])), [operators]);
+
   async function addEntry() {
     if (!amount || Number(amount) <= 0) return;
     if (entryType === "external" && !recipientName.trim()) return;
@@ -658,6 +660,11 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
           : "")
       : `${recipientName}${recipientDetail ? ` — ${recipientDetail}` : ""}`;
 
+    // Resolve operator name → UUID (approved_by is a uuid FK column)
+    const approvedById = receivedBy
+      ? (operators.find(o => o.name === receivedBy)?.id || null)
+      : null;
+
     const { data, error } = await supabase.from("sadaqat_pool").insert({
       transaction_type:        "outflow",
       amount:                  Number(amount),
@@ -666,7 +673,7 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
       destination_description: description || reason || null,
       month_year:              monthYear,
       reason:                  reason || null,
-      approved_by:             receivedBy || null,
+      approved_by:             approvedById,
     }).select("*").single();
 
     if (!error && data) setEntries(prev => [...prev, data]);
@@ -880,7 +887,7 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
                     <span className={`badge ${e.destination_type === "kafala_case" ? "badge-neutral" : "badge-advance"}`} style={{ fontSize: "0.65rem" }}>
                       {e.destination_type === "kafala_case" ? "كفالة" : "خارجي"}
                     </span>
-                    {e.approved_by && <span>استلمه: <strong>{e.approved_by}</strong></span>}
+                    {e.approved_by && <span>استلمه: <strong>{opMap[e.approved_by] || e.approved_by}</strong></span>}
                   </div>
                 </div>
                 <strong style={{ color: "var(--text-1)", whiteSpace: "nowrap" }}>{fmt(e.amount)} ج</strong>
