@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import {
   Users, DollarSign, TrendingUp, TrendingDown, Building2,
-  Search, Plus, FileText, ChevronDown, ClipboardList, Archive
+  Search, Plus, FileText, ChevronDown, ClipboardList, Archive, Heart
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -293,12 +293,12 @@ export default function Home() {
           <div className="app-logo">خدمة</div>
           <span className="app-logo-sub">نظام إدارة الكفالات</span>
         </div>
-        {/* Desktop actions */}
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <div className="hidden md:flex" style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 6 }}>
             <Link href="/tahseel"  className="btn btn-secondary btn-sm"><ClipboardList size={15} />التحصيل</Link>
+            <Link href="/sadaqat"  className="btn btn-secondary btn-sm"><Heart size={15} />الصدقات</Link>
             <Link href="/register" className="btn btn-secondary btn-sm"><Plus size={15} />تسجيل</Link>
-            <Link href="/settle"   className="btn btn-secondary btn-sm"><FileText size={15} />تسوية الشهر</Link>
+            <Link href="/settle"   className="btn btn-secondary btn-sm"><FileText size={15} />تسوية</Link>
           </div>
           {/* Month selector */}
           <div style={{ position: "relative" }}>

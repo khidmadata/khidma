@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import { BottomNav } from "./_components/BottomNav";
 
 export const metadata: Metadata = {
   title: "خدمة — نظام إدارة الكفالات",
@@ -23,7 +22,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         {children}
-        <BottomNav />
       </body>
     </html>
   );

@@ -55,11 +55,6 @@ body {
   background: var(--cream);
   color: var(--text-1);
   -webkit-font-smoothing: antialiased;
-  padding-bottom: 68px;
-}
-
-@media (min-width: 768px) {
-  body { padding-bottom: 0; }
 }
 
 * { box-sizing: border-box; }
@@ -386,45 +381,6 @@ label.field-label {
   margin: 1rem 0;
 }
 
-/* ─────────────────────────────────────
-   BOTTOM NAV (MOBILE ONLY)
-───────────────────────────────────── */
-.bottom-nav {
-  position: fixed;
-  bottom: 0;
-  right: 0;
-  left: 0;
-  height: 64px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  display: flex;
-  z-index: 50;
-  box-shadow: 0 -4px 16px rgba(0,0,0,0.06);
-}
-
-.bottom-nav-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  color: var(--text-3);
-  text-decoration: none;
-  font-size: 0.65rem;
-  font-weight: 600;
-  font-family: inherit;
-  transition: color 0.15s;
-  border: none;
-  background: none;
-  cursor: pointer;
-}
-
-.bottom-nav-item.active { color: var(--green); }
-
-@media (min-width: 768px) {
-  .bottom-nav { display: none; }
-}
 
 /* ─────────────────────────────────────
    SEARCH DROPDOWN
