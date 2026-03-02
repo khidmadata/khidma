@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-  ArrowRight, Check, Trash2, ChevronDown, CheckCircle, Circle, FileText, AlertCircle,
+  ArrowRight, Check, Trash2, CheckCircle, Circle,
+  FileText, AlertCircle, Pencil, X, Plus, MapPin,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -15,15 +16,23 @@ type Sponsorship = {
   cases: { child_name: string; guardian_name: string | null; area_id: string } | null;
 };
 type Operator    = { id: string; name: string };
-type Adjustment  = {
-  id: string; sponsorship_id: string; month_year: string;
-  adjustment_type: string; amount: number; old_fixed_amount: number;
-  reason: string | null; applied: boolean;
-  sponsorships?: {
-    fixed_amount: number;
-    sponsors: { name: string } | null;
-    cases: { child_name: string; guardian_name: string | null } | null;
-  };
+
+type SettleRow = {
+  sponsorship_id: string;
+  sponsor_id: string;
+  case_id: string;
+  child_name: string;
+  guardian_name: string | null;
+  sponsor_name: string;
+  fixed: number;
+  newFixed: number;
+  extras: number;
+  newExtras: number;
+  extra_adj_id: string | null;
+  included: boolean;
+  collected: boolean;
+  received_by: string;
+  editing: boolean;
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -40,24 +49,15 @@ function fmtMonth(m: string) {
   return `${MONTHS_AR[mo] || mo} ${y}`;
 }
 
-function genMonthOptions() {
-  const opts: { value: string; label: string }[] = [];
+function genThreeMonths() {
   const now = new Date();
-  for (let i = -1; i < 24; i++) {
+  const results: { value: string; label: string }[] = [];
+  for (let i = 2; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    opts.push({ value, label: fmtMonth(value) });
+    results.push({ value, label: fmtMonth(value) });
   }
-  return opts;
-}
-
-function currentMonth() {
-  const now = new Date();
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const d = now.getDate() >= lastDay - 6
-    ? new Date(now.getFullYear(), now.getMonth() + 1, 1)
-    : now;
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return results;
 }
 
 // ─── Shared: Sponsorship Search Dropdown ─────────────────────────────────────
@@ -125,484 +125,600 @@ function SpSearch({
   );
 }
 
-// ─── Shared: Collected Toggle ─────────────────────────────────────────────────
-function CollectedBtn({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!value)}
-      style={{
-        display: "flex", alignItems: "center", gap: 6,
-        padding: "6px 12px", borderRadius: 100, border: "none", cursor: "pointer",
-        fontSize: "0.8rem", fontWeight: 700,
-        background: value ? "var(--green-light)" : "var(--surface-2)",
-        color:      value ? "var(--green)"       : "var(--text-3)",
-        transition: "all 0.15s",
-      }}
-    >
-      {value ? <CheckCircle size={15} /> : <Circle size={15} />}
-      {value ? "تم التحصيل" : "لم يُحصَّل"}
-    </button>
-  );
-}
-
 // ─── Shared: Loading ──────────────────────────────────────────────────────────
 function Loader() {
   return <div style={{ textAlign: "center", padding: "3rem", color: "var(--text-3)" }}>جاري التحميل...</div>;
 }
 
-// ─── Shared: Selected Sponsorship Card ───────────────────────────────────────
-function SelectedCard({ sp, extra }: { sp: Sponsorship; extra: string }) {
-  return (
-    <div style={{ background: "var(--cream)", borderRadius: "var(--radius-sm)", padding: "0.6rem 0.875rem", fontSize: "0.875rem", border: "1px solid var(--border-light)" }}>
-      <span style={{ fontWeight: 700 }}>{sp.sponsors?.name}</span>
-      <span style={{ color: "var(--text-3)", margin: "0 8px" }}>←</span>
-      <span>{sp.cases?.child_name}</span>
-      {sp.cases?.guardian_name && (
-        <span style={{ color: "var(--text-3)", fontSize: "0.78rem" }}> (وليّ: {sp.cases.guardian_name})</span>
-      )}
-      <span style={{ float: "left", color: "var(--indigo)", fontWeight: 700 }}>{extra}</span>
-    </div>
-  );
-}
-
-// ─── Shared: Adjustments List ─────────────────────────────────────────────────
-function AdjList({
-  items, title, renderAmount, totalLabel, totalValue, totalColor, onDelete, onToggle,
+// ═══════════════════════════════════════════════════════════════════════════════
+// STEP "area" — Area & Month Selector
+// ═══════════════════════════════════════════════════════════════════════════════
+function AreaMonthStep({
+  onSelect,
 }: {
-  items: Adjustment[];
-  title: string;
-  renderAmount: (e: Adjustment) => React.ReactNode;
-  totalLabel: string;
-  totalValue: string;
-  totalColor: string;
-  onDelete: (id: string) => void;
-  onToggle: (id: string, current: boolean) => void;
+  onSelect: (area: Area | null, month: string) => void;
 }) {
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedArea, setSelectedArea] = useState<Area | null | "manual">(undefined as any);
+  const monthOptions = useMemo(genThreeMonths, []);
+
+  useEffect(() => {
+    supabase.from("areas").select("id, name").eq("is_active", true).then(({ data }) => {
+      setAreas(data || []);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return <Loader />;
+
   return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <h3 style={{ fontSize: "0.9rem", marginBottom: 12 }}>
-        {title}
-        <span style={{ fontWeight: 400, color: "var(--text-3)", marginRight: 8 }}>({items.length})</span>
-      </h3>
-      <div style={{ display: "grid", gap: 8 }}>
-        {items.map(e => (
-          <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--cream)", borderRadius: "var(--radius-sm)", padding: "0.6rem 0.875rem" }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700, fontSize: "0.875rem" }}>
-                {(e.sponsorships as any)?.sponsors?.name} ← {(e.sponsorships as any)?.cases?.child_name}
-                {(e.sponsorships as any)?.cases?.guardian_name && (
-                  <span style={{ fontWeight: 400, fontSize: "0.75rem", color: "var(--text-3)" }}>
-                    {" "}(وليّ: {(e.sponsorships as any).cases.guardian_name})
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: "0.78rem", color: "var(--text-3)", marginTop: 2 }}>
-                {renderAmount(e)}
-                {e.reason && <span style={{ marginRight: 8 }}>— {e.reason}</span>}
-              </div>
-            </div>
-            <button
-              onClick={() => onToggle(e.id, e.applied)}
-              style={{
-                padding: "3px 8px", borderRadius: 100, border: "none", cursor: "pointer",
-                fontSize: "0.72rem", fontWeight: 700, whiteSpace: "nowrap",
-                background: e.applied ? "var(--green-light)" : "var(--surface-2)",
-                color:      e.applied ? "var(--green)"       : "var(--text-3)",
-              }}
-            >
-              {e.applied ? "✓ محصَّل" : "لم يُحصَّل"}
-            </button>
-            <button
-              onClick={() => onDelete(e.id)}
-              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-3)", padding: 4 }}
-              onMouseEnter={ev => (ev.currentTarget.style.color = "var(--red)")}
-              onMouseLeave={ev => (ev.currentTarget.style.color = "var(--text-3)")}
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
+    <div>
+      <h2 style={{ marginBottom: 4 }}>اختر المنطقة</h2>
+      <p style={{ fontSize: "0.82rem", color: "var(--text-3)", margin: "0 0 1.25rem" }}>
+        حدد منطقة التسوية لهذا الشهر
+      </p>
+
+      {/* Area cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, marginBottom: 20 }}>
+        {areas.map(area => (
+          <button
+            key={area.id}
+            onClick={() => setSelectedArea(area)}
+            className="card"
+            style={{
+              cursor: "pointer", textAlign: "center", padding: "1.25rem 1rem",
+              border: (selectedArea as any)?.id === area.id
+                ? "2px solid var(--green)" : "1.5px solid var(--border)",
+              background: (selectedArea as any)?.id === area.id ? "var(--green-light)" : "var(--surface)",
+              transition: "all 0.15s",
+            }}
+          >
+            <MapPin size={20} style={{ color: "var(--green)", marginBottom: 6 }} />
+            <div style={{ fontWeight: 700, fontSize: "1rem" }}>{area.name}</div>
+          </button>
         ))}
+        <button
+          onClick={() => setSelectedArea("manual")}
+          className="card"
+          style={{
+            cursor: "pointer", textAlign: "center", padding: "1.25rem 1rem",
+            border: selectedArea === "manual"
+              ? "2px solid var(--indigo)" : "1.5px solid var(--border)",
+            background: selectedArea === "manual" ? "var(--indigo-light)" : "var(--surface)",
+            transition: "all 0.15s",
+          }}
+        >
+          <Plus size={20} style={{ color: "var(--indigo)", marginBottom: 6 }} />
+          <div style={{ fontWeight: 700, fontSize: "1rem" }}>إدخال يدوي</div>
+          <div style={{ fontSize: "0.72rem", color: "var(--text-3)", marginTop: 4 }}>
+            اختر حالات بشكل يدوي
+          </div>
+        </button>
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)", fontSize: "0.875rem" }}>
-        <span style={{ color: "var(--text-2)" }}>{totalLabel}</span>
-        <strong style={{ color: totalColor }}>{totalValue}</strong>
-      </div>
-    </div>
-  );
-}
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MAIN PAGE
-// ═══════════════════════════════════════════════════════════════════════════════
-export default function SettlePage() {
-  const [step,      setStep]      = useState(1);
-  const [monthYear, setMonthYear] = useState(currentMonth());
-  const monthOptions = useMemo(genMonthOptions, []);
-
-  const STEPS = [
-    { n: 1, label: "زيادات دائمة"  },
-    { n: 2, label: "زيادات مؤقتة" },
-    { n: 3, label: "الصدقات"       },
-    { n: 4, label: "التقارير"      },
-  ];
-
-  return (
-    <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
-      <header className="app-header">
-        <Link href="/" className="btn btn-ghost btn-sm" style={{ gap: 4 }}>
-          <ArrowRight size={18} />
-        </Link>
-        <div style={{ flex: 1, paddingRight: 12 }}>
-          <div className="app-logo" style={{ fontSize: "1.1rem" }}>تسوية الشهر</div>
-        </div>
-        <div style={{ position: "relative" }}>
-          <select value={monthYear} onChange={e => setMonthYear(e.target.value)} className="select-field"
-            style={{ paddingLeft: 28, minWidth: 148, height: 38, fontSize: "0.8rem" }}>
-            {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <ChevronDown size={13} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-3)", pointerEvents: "none" }} />
-        </div>
-      </header>
-
-      {/* Step indicator */}
-      <div style={{ maxWidth: 760, margin: "0 auto", padding: "1.25rem 1rem 0" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 24 }}>
-          {STEPS.map((s, i) => (
-            <div key={s.n} style={{ display: "flex", flex: 1, alignItems: "center" }}>
+      {/* Month pills — shown after area is chosen */}
+      {selectedArea !== undefined && selectedArea !== (undefined as any) && (
+        <div>
+          <h3 style={{ fontSize: "0.9rem", marginBottom: 12 }}>اختر الشهر</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+            {monthOptions.map((m, i) => (
               <button
-                onClick={() => setStep(s.n)}
+                key={m.value}
+                onClick={() => onSelect(selectedArea === "manual" ? null : selectedArea as Area, m.value)}
+                className="btn"
                 style={{
-                  width: 30, height: 30, borderRadius: "50%", border: "none", cursor: "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: "0.8rem", fontWeight: 800, flexShrink: 0,
-                  background: step >= s.n ? "var(--green)" : "var(--border)",
-                  color:      step >= s.n ? "white"        : "var(--text-3)",
-                  transition: "background 0.2s",
+                  padding: "14px 8px",
+                  background: i === 2 ? "var(--green)" : "var(--surface)",
+                  color: i === 2 ? "white" : "var(--text-1)",
+                  border: i === 2 ? "none" : "1.5px solid var(--border)",
+                  fontWeight: 700, fontSize: "0.9rem",
+                  borderRadius: "var(--radius)",
                 }}
-              >{s.n}</button>
-              <span style={{
-                fontSize: "0.7rem", marginRight: 6,
-                fontWeight: step >= s.n ? 700 : 400,
-                color: step >= s.n ? "var(--text-1)" : "var(--text-3)",
-                whiteSpace: "nowrap",
-              }}>{s.label}</span>
-              {i < 3 && (
-                <div style={{ flex: 1, height: 2, margin: "0 6px", borderRadius: 2, background: step > s.n ? "var(--green)" : "var(--border)" }} />
-              )}
-            </div>
-          ))}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: "0.75rem", color: "var(--text-3)", marginTop: 8, textAlign: "center" }}>
+            الشهر الأخير (باللون الأخضر) هو الشهر الحالي
+          </p>
         </div>
-      </div>
-
-      <main style={{ maxWidth: 760, margin: "0 auto", padding: "0 1rem 3rem" }}>
-        {step === 1 && <StepPermanent monthYear={monthYear} onNext={() => setStep(2)} />}
-        {step === 2 && <StepOneTime   monthYear={monthYear} onNext={() => setStep(3)} onBack={() => setStep(1)} />}
-        {step === 3 && <StepSadaqat  monthYear={monthYear} onNext={() => setStep(4)} onBack={() => setStep(2)} />}
-        {step === 4 && <StepReports  monthYear={monthYear} onBack={() => setStep(3)} />}
-      </main>
+      )}
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// STEP 1 — PERMANENT INCREASES
+// STEP "table" — Settlement Table
 // ═══════════════════════════════════════════════════════════════════════════════
-function StepPermanent({ monthYear, onNext }: { monthYear: string; onNext: () => void }) {
-  const [sponsorships, setSponsorships] = useState<Sponsorship[]>([]);
-  const [existing,     setExisting]     = useState<Adjustment[]>([]);
-  const [loading,      setLoading]      = useState(true);
-  const [saving,       setSaving]       = useState(false);
-
-  const [search,     setSearch]     = useState("");
-  const [selectedSp, setSelectedSp] = useState<Sponsorship | null>(null);
-  const [newAmount,  setNewAmount]  = useState("");
-  const [reason,     setReason]     = useState("");
-  const [collected,  setCollected]  = useState(false);
+function SettlementTable({
+  area, monthYear, onNext, onBack,
+}: {
+  area: Area | null;
+  monthYear: string;
+  onNext: () => void;
+  onBack: () => void;
+}) {
+  const [rows, setRows] = useState<SettleRow[]>([]);
+  const [allSponsorships, setAllSponsorships] = useState<Sponsorship[]>([]);
+  const [operators, setOperators] = useState<Operator[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [addSearch, setAddSearch] = useState("");
+  const [showAddSearch, setShowAddSearch] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      const [spRes, adjRes] = await Promise.all([
-        supabase.from("sponsorships")
-          .select("id, sponsor_id, case_id, fixed_amount, sponsors(name), cases(child_name, guardian_name, area_id)")
-          .eq("status", "active"),
-        supabase.from("monthly_adjustments")
-          .select("*, sponsorships(fixed_amount, sponsors(name), cases(child_name, guardian_name))")
-          .eq("month_year", monthYear)
-          .eq("adjustment_type", "permanent_increase"),
-      ]);
-      setSponsorships((spRes.data as any) || []);
-      setExisting((adjRes.data as any) || []);
+    load();
+  }, [area, monthYear]);
+
+  async function load() {
+    setLoading(true);
+
+    // Load operators
+    const opRes = await supabase.from("operators").select("id, name").neq("name", "شريف");
+    setOperators(opRes.data || []);
+
+    // Load ALL active sponsorships for the add-case search
+    const allSpRes = await supabase
+      .from("sponsorships")
+      .select("id, sponsor_id, case_id, fixed_amount, sponsors(name), cases(child_name, guardian_name, area_id)")
+      .eq("status", "active");
+    setAllSponsorships((allSpRes.data as any) || []);
+
+    // If manual mode: start with empty table
+    if (!area) {
+      setRows([]);
       setLoading(false);
-    })();
-  }, [monthYear]);
-
-  async function addEntry() {
-    if (!selectedSp || !newAmount || Number(newAmount) <= selectedSp.fixed_amount) return;
-    setSaving(true);
-    const { data, error } = await supabase.from("monthly_adjustments").insert({
-      sponsorship_id:   selectedSp.id,
-      case_id:          selectedSp.case_id,
-      sponsor_id:       selectedSp.sponsor_id,
-      month_year:       monthYear,
-      adjustment_type:  "permanent_increase",
-      amount:           Number(newAmount),
-      old_fixed_amount: selectedSp.fixed_amount,
-      reason:           reason || null,
-      applied:          collected,
-    })
-    .select("*, sponsorships(fixed_amount, sponsors(name), cases(child_name, guardian_name))")
-    .single();
-
-    if (!error && data) {
-      await supabase.from("sponsorships").update({ fixed_amount: Number(newAmount) }).eq("id", selectedSp.id);
-      setSponsorships(prev => prev.map(s =>
-        s.id === selectedSp.id ? { ...s, fixed_amount: Number(newAmount) } : s
-      ));
-      setExisting(prev => [...prev, data as any]);
+      return;
     }
-    if (error) alert("خطأ: " + error.message);
-    setSelectedSp(null); setSearch(""); setNewAmount(""); setReason(""); setCollected(false);
-    setSaving(false);
-  }
 
-  async function removeEntry(id: string) {
-    await supabase.from("monthly_adjustments").delete().eq("id", id);
-    setExisting(prev => prev.filter(e => e.id !== id));
-  }
+    // Get cases for this area
+    const caseRes = await supabase
+      .from("cases")
+      .select("id")
+      .eq("area_id", area.id)
+      .eq("status", "active");
+    const caseIds = (caseRes.data || []).map((c: any) => c.id);
 
-  async function toggleCollected(id: string, current: boolean) {
-    await supabase.from("monthly_adjustments").update({ applied: !current }).eq("id", id);
-    setExisting(prev => prev.map(e => e.id === id ? { ...e, applied: !current } : e));
-  }
-
-  if (loading) return <Loader />;
-
-  const totalIncrease = existing.reduce((s, e) => s + (Number(e.amount) - Number(e.old_fixed_amount)), 0);
-
-  return (
-    <div>
-      <h2 style={{ marginBottom: 4 }}>١. الزيادات الدائمة</h2>
-      <p style={{ fontSize: "0.82rem", color: "var(--text-3)", marginBottom: 20, margin: "0 0 1.25rem" }}>
-        تغييرات دائمة في مبلغ الكفالة — تُطبَّق من هذا الشهر فصاعداً
-      </p>
-
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h3 style={{ fontSize: "0.9rem", marginBottom: 12 }}>إضافة زيادة دائمة</h3>
-        <SpSearch
-          sponsorships={sponsorships}
-          value={search}
-          onChange={v => { setSearch(v); setSelectedSp(null); }}
-          onSelect={s => { setSelectedSp(s); setSearch(`${s.sponsors?.name} ← ${s.cases?.child_name}`); }}
-        />
-
-        {selectedSp && (
-          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-            <SelectedCard sp={selectedSp} extra={`الكفالة الحالية: ${fmt(selectedSp.fixed_amount)} ج`} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <div>
-                <label className="field-label">المبلغ الشهري الجديد</label>
-                <input
-                  type="number" value={newAmount} onChange={e => setNewAmount(e.target.value)}
-                  className="input-field" dir="ltr"
-                  placeholder={`أكثر من ${selectedSp.fixed_amount}`}
-                />
-                {newAmount && Number(newAmount) > selectedSp.fixed_amount && (
-                  <div style={{ fontSize: "0.72rem", color: "var(--green)", marginTop: 3 }}>
-                    زيادة: +{fmt(Number(newAmount) - selectedSp.fixed_amount)} ج/شهر
-                  </div>
-                )}
-                {newAmount && Number(newAmount) > 0 && Number(newAmount) <= selectedSp.fixed_amount && (
-                  <div style={{ fontSize: "0.72rem", color: "var(--red)", marginTop: 3 }}>
-                    يجب أن يكون أكبر من المبلغ الحالي
-                  </div>
-                )}
-              </div>
-              <div>
-                <label className="field-label">السبب</label>
-                <input value={reason} onChange={e => setReason(e.target.value)}
-                  className="input-field" placeholder="مثل: زيادة سنوية..." />
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <CollectedBtn value={collected} onChange={setCollected} />
-              <button
-                onClick={addEntry}
-                disabled={saving || !newAmount || Number(newAmount) <= selectedSp.fixed_amount}
-                className="btn btn-primary"
-              >
-                {saving ? "جاري الحفظ..." : "+ إضافة"}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {existing.length > 0 && (
-        <AdjList
-          items={existing}
-          title={`الزيادات الدائمة — ${fmtMonth(monthYear)}`}
-          renderAmount={e => (
-            <span>
-              {fmt(e.old_fixed_amount)} → <strong style={{ color: "var(--green)" }}>{fmt(e.amount)}</strong> ج
-            </span>
-          )}
-          totalLabel="إجمالي الزيادة الدائمة"
-          totalValue={`+${fmt(totalIncrease)} ج/شهر`}
-          totalColor="var(--green)"
-          onDelete={removeEntry}
-          onToggle={toggleCollected}
-        />
-      )}
-
-      <button onClick={onNext} className="btn btn-primary btn-lg" style={{ width: "100%" }}>
-        التالي: الزيادات المؤقتة ←
-      </button>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// STEP 2 — ONE-TIME INCREASES
-// ═══════════════════════════════════════════════════════════════════════════════
-function StepOneTime({ monthYear, onNext, onBack }: { monthYear: string; onNext: () => void; onBack: () => void }) {
-  const [sponsorships, setSponsorships] = useState<Sponsorship[]>([]);
-  const [existing,     setExisting]     = useState<Adjustment[]>([]);
-  const [loading,      setLoading]      = useState(true);
-  const [saving,       setSaving]       = useState(false);
-
-  const [search,     setSearch]     = useState("");
-  const [selectedSp, setSelectedSp] = useState<Sponsorship | null>(null);
-  const [amount,     setAmount]     = useState("");
-  const [reason,     setReason]     = useState("");
-  const [collected,  setCollected]  = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      const [spRes, adjRes] = await Promise.all([
-        supabase.from("sponsorships")
-          .select("id, sponsor_id, case_id, fixed_amount, sponsors(name), cases(child_name, guardian_name, area_id)")
-          .eq("status", "active"),
-        supabase.from("monthly_adjustments")
-          .select("*, sponsorships(fixed_amount, sponsors(name), cases(child_name, guardian_name))")
-          .eq("month_year", monthYear)
-          .eq("adjustment_type", "one_time_extra"),
-      ]);
-      setSponsorships((spRes.data as any) || []);
-      setExisting((adjRes.data as any) || []);
+    if (!caseIds.length) {
+      setRows([]);
       setLoading(false);
-    })();
-  }, [monthYear]);
+      return;
+    }
 
-  async function addEntry() {
-    if (!selectedSp || !amount || Number(amount) <= 0) return;
+    // Get sponsorships for those cases
+    const spRes = await supabase
+      .from("sponsorships")
+      .select("id, sponsor_id, case_id, fixed_amount, sponsors(name), cases(child_name, guardian_name, area_id)")
+      .in("case_id", caseIds)
+      .eq("status", "active");
+    const sps: Sponsorship[] = (spRes.data as any) || [];
+
+    // Get existing one_time_extra adjustments for this month
+    const adjRes = await supabase
+      .from("monthly_adjustments")
+      .select("id, sponsorship_id, case_id, amount")
+      .eq("month_year", monthYear)
+      .eq("adjustment_type", "one_time_extra")
+      .in("case_id", caseIds);
+    const adjs: any[] = adjRes.data || [];
+
+    // Build rows
+    const newRows: SettleRow[] = sps.map(sp => {
+      const adj = adjs.find(a => a.sponsorship_id === sp.id);
+      const extras = adj ? Number(adj.amount) : 0;
+      return {
+        sponsorship_id: sp.id,
+        sponsor_id: sp.sponsor_id,
+        case_id: sp.case_id,
+        child_name: sp.cases?.child_name || "—",
+        guardian_name: sp.cases?.guardian_name || null,
+        sponsor_name: sp.sponsors?.name || "—",
+        fixed: sp.fixed_amount,
+        newFixed: sp.fixed_amount,
+        extras,
+        newExtras: extras,
+        extra_adj_id: adj?.id || null,
+        included: true,
+        collected: false,
+        received_by: "",
+        editing: false,
+      };
+    }).sort((a, b) => a.child_name.localeCompare(b.child_name, "ar"));
+
+    setRows(newRows);
+    setLoading(false);
+  }
+
+  function updateRow(idx: number, changes: Partial<SettleRow>) {
+    setRows(prev => prev.map((r, i) => i === idx ? { ...r, ...changes } : r));
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    setRows(prev => prev.map(r => ({ ...r, included: checked })));
+  }
+
+  function addSponsorship(sp: Sponsorship) {
+    if (rows.find(r => r.sponsorship_id === sp.id)) return; // already in table
+    const newRow: SettleRow = {
+      sponsorship_id: sp.id,
+      sponsor_id: sp.sponsor_id,
+      case_id: sp.case_id,
+      child_name: sp.cases?.child_name || "—",
+      guardian_name: sp.cases?.guardian_name || null,
+      sponsor_name: sp.sponsors?.name || "—",
+      fixed: sp.fixed_amount,
+      newFixed: sp.fixed_amount,
+      extras: 0,
+      newExtras: 0,
+      extra_adj_id: null,
+      included: true,
+      collected: false,
+      received_by: "",
+      editing: false,
+    };
+    setRows(prev => [...prev, newRow]);
+    setAddSearch("");
+    setShowAddSearch(false);
+  }
+
+  async function saveAndContinue() {
     setSaving(true);
-    const { data, error } = await supabase.from("monthly_adjustments").insert({
-      sponsorship_id:   selectedSp.id,
-      case_id:          selectedSp.case_id,
-      sponsor_id:       selectedSp.sponsor_id,
-      month_year:       monthYear,
-      adjustment_type:  "one_time_extra",
-      amount:           Number(amount),
-      old_fixed_amount: selectedSp.fixed_amount,
-      reason:           reason || null,
-      applied:          collected,
-    })
-    .select("*, sponsorships(fixed_amount, sponsors(name), cases(child_name, guardian_name))")
-    .single();
+    const errors: string[] = [];
 
-    if (!error && data) setExisting(prev => [...prev, data as any]);
-    if (error) alert("خطأ: " + error.message);
-    setSelectedSp(null); setSearch(""); setAmount(""); setReason(""); setCollected(false);
+    for (const row of rows) {
+      // Save extras changes
+      if (row.newExtras !== row.extras) {
+        if (row.extra_adj_id) {
+          if (row.newExtras > 0) {
+            const { error } = await supabase
+              .from("monthly_adjustments")
+              .update({ amount: row.newExtras })
+              .eq("id", row.extra_adj_id);
+            if (error) errors.push(error.message);
+          } else {
+            // newExtras = 0, delete the adj
+            const { error } = await supabase
+              .from("monthly_adjustments")
+              .delete()
+              .eq("id", row.extra_adj_id);
+            if (error) errors.push(error.message);
+          }
+        } else if (row.newExtras > 0) {
+          // No existing adj, insert new
+          const { error } = await supabase
+            .from("monthly_adjustments")
+            .insert({
+              sponsorship_id:  row.sponsorship_id,
+              case_id:         row.case_id,
+              sponsor_id:      row.sponsor_id,
+              month_year:      monthYear,
+              adjustment_type: "one_time_extra",
+              amount:          row.newExtras,
+              old_fixed_amount: row.fixed,
+              applied:         row.collected,
+            });
+          if (error) errors.push(error.message);
+        }
+      }
+
+      // Save permanent fixed changes
+      if (row.newFixed !== row.fixed && row.newFixed > 0) {
+        const { error: spErr } = await supabase
+          .from("sponsorships")
+          .update({ fixed_amount: row.newFixed })
+          .eq("id", row.sponsorship_id);
+        if (spErr) errors.push(spErr.message);
+        else {
+          const { error: adjErr } = await supabase
+            .from("monthly_adjustments")
+            .insert({
+              sponsorship_id:   row.sponsorship_id,
+              case_id:          row.case_id,
+              sponsor_id:       row.sponsor_id,
+              month_year:       monthYear,
+              adjustment_type:  "permanent_increase",
+              amount:           row.newFixed,
+              old_fixed_amount: row.fixed,
+              applied:          row.collected,
+            });
+          if (adjErr) errors.push(adjErr.message);
+        }
+      }
+    }
+
     setSaving(false);
-  }
-
-  async function removeEntry(id: string) {
-    await supabase.from("monthly_adjustments").delete().eq("id", id);
-    setExisting(prev => prev.filter(e => e.id !== id));
-  }
-
-  async function toggleCollected(id: string, current: boolean) {
-    await supabase.from("monthly_adjustments").update({ applied: !current }).eq("id", id);
-    setExisting(prev => prev.map(e => e.id === id ? { ...e, applied: !current } : e));
+    if (errors.length) {
+      alert("حدثت بعض الأخطاء:\n" + errors.join("\n"));
+    }
+    onNext();
   }
 
   if (loading) return <Loader />;
 
-  const total = existing.reduce((s, e) => s + Number(e.amount), 0);
+  const includedRows = rows.filter(r => r.included);
+  const grandFixed   = includedRows.reduce((s, r) => s + r.newFixed, 0);
+  const grandExtras  = includedRows.reduce((s, r) => s + r.newExtras, 0);
+  const grandTotal   = grandFixed + grandExtras;
+  const allIncluded  = rows.length > 0 && rows.every(r => r.included);
+
+  // Sponsorships not already in the table (for add-case search)
+  const addableSps = allSponsorships.filter(sp => !rows.find(r => r.sponsorship_id === sp.id));
 
   return (
     <div>
-      <h2 style={{ marginBottom: 4 }}>٢. الزيادات المؤقتة</h2>
-      <p style={{ fontSize: "0.82rem", color: "var(--text-3)", marginBottom: 20, margin: "0 0 1.25rem" }}>
-        زيادات لهذا الشهر فقط — مصاريف دراسية، ملابس العيد، احتياجات طارئة
-      </p>
-
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h3 style={{ fontSize: "0.9rem", marginBottom: 12 }}>إضافة زيادة مؤقتة</h3>
-        <SpSearch
-          sponsorships={sponsorships}
-          value={search}
-          onChange={v => { setSearch(v); setSelectedSp(null); }}
-          onSelect={s => { setSelectedSp(s); setSearch(`${s.sponsors?.name} ← ${s.cases?.child_name}`); }}
-        />
-
-        {selectedSp && (
-          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-            <SelectedCard sp={selectedSp} extra={`كفالة: ${fmt(selectedSp.fixed_amount)} ج`} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <div>
-                <label className="field-label">مبلغ الزيادة</label>
-                <input
-                  type="number" value={amount} onChange={e => setAmount(e.target.value)}
-                  className="input-field" dir="ltr" placeholder="مثل: 500"
-                />
-              </div>
-              <div>
-                <label className="field-label">السبب</label>
-                <input value={reason} onChange={e => setReason(e.target.value)}
-                  className="input-field" placeholder="مصاريف دراسية، لبس عيد..." />
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <CollectedBtn value={collected} onChange={setCollected} />
-              <button
-                onClick={addEntry}
-                disabled={saving || !amount || Number(amount) <= 0}
-                className="btn btn-primary"
-              >
-                {saving ? "جاري الحفظ..." : "+ إضافة"}
-              </button>
-            </div>
-          </div>
-        )}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div>
+          <h2 style={{ marginBottom: 2 }}>الكفالات — {fmtMonth(monthYear)}</h2>
+          <p style={{ fontSize: "0.8rem", color: "var(--text-3)", margin: 0 }}>
+            {area ? area.name : "إدخال يدوي"} — {rows.length} حالة
+          </p>
+        </div>
+        <button
+          onClick={() => setShowAddSearch(v => !v)}
+          className="btn btn-secondary btn-sm"
+          style={{ gap: 4 }}
+        >
+          <Plus size={14} /> إضافة حالة
+        </button>
       </div>
 
-      {existing.length > 0 && (
-        <AdjList
-          items={existing}
-          title={`الزيادات المؤقتة — ${fmtMonth(monthYear)}`}
-          renderAmount={e => (
-            <span>زيادة: <strong style={{ color: "var(--gold)" }}>+{fmt(e.amount)}</strong> ج</span>
-          )}
-          totalLabel="إجمالي الزيادات المؤقتة"
-          totalValue={`+${fmt(total)} ج`}
-          totalColor="var(--gold)"
-          onDelete={removeEntry}
-          onToggle={toggleCollected}
-        />
+      {/* Add-case search */}
+      {showAddSearch && (
+        <div className="card" style={{ marginBottom: 12, padding: "0.875rem" }}>
+          <p style={{ fontSize: "0.8rem", color: "var(--text-2)", marginBottom: 8 }}>
+            ابحث عن كفالة لإضافتها للقائمة:
+          </p>
+          <SpSearch
+            sponsorships={addableSps}
+            value={addSearch}
+            onChange={setAddSearch}
+            onSelect={sp => addSponsorship(sp)}
+            placeholder="ابحث باسم الكفيل أو الطفل..."
+          />
+        </div>
       )}
 
-      <div style={{ display: "flex", gap: 10 }}>
-        <button onClick={onBack} className="btn btn-secondary" style={{ flex: 1 }}>← السابق</button>
-        <button onClick={onNext} className="btn btn-primary"   style={{ flex: 1 }}>التالي: الصدقات ←</button>
+      {rows.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "3rem", color: "var(--text-3)", background: "var(--surface)", borderRadius: "var(--radius)", border: "1.5px dashed var(--border)" }}>
+          <Plus size={32} style={{ marginBottom: 8, opacity: 0.4 }} />
+          <div>لا توجد كفالات. اضغط "إضافة حالة" لإضافة الكفالات يدوياً.</div>
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto", marginBottom: 16 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
+            <thead>
+              <tr style={{ background: "#F0EDE7" }}>
+                <th style={{ padding: "10px 10px", textAlign: "center", width: 36 }}>
+                  <input
+                    type="checkbox"
+                    checked={allIncluded}
+                    onChange={e => toggleSelectAll(e.target.checked)}
+                    style={{ cursor: "pointer", width: 16, height: 16 }}
+                  />
+                </th>
+                <th style={{ padding: "10px 8px", textAlign: "right", fontWeight: 700, color: "var(--text-2)" }}>الطفل</th>
+                <th style={{ padding: "10px 8px", textAlign: "right", fontWeight: 700, color: "var(--text-2)" }}>الكفيل</th>
+                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>الكفالة</th>
+                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>الزيادة</th>
+                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-1)", background: "#E4DDD3", whiteSpace: "nowrap" }}>الإجمالي</th>
+                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>تحصيل</th>
+                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>استلم</th>
+                <th style={{ padding: "10px 8px", textAlign: "center", width: 64 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, idx) => (
+                <>
+                  <tr
+                    key={row.sponsorship_id}
+                    style={{
+                      background: row.included
+                        ? (idx % 2 === 0 ? "white" : "var(--cream)")
+                        : "#F8F5F0",
+                      opacity: row.included ? 1 : 0.45,
+                      borderBottom: row.editing ? "none" : "1px solid var(--border)",
+                    }}
+                  >
+                    {/* Include checkbox */}
+                    <td style={{ padding: "8px 10px", textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={row.included}
+                        onChange={e => updateRow(idx, { included: e.target.checked })}
+                        style={{ cursor: "pointer", width: 16, height: 16 }}
+                      />
+                    </td>
+
+                    {/* Child name */}
+                    <td style={{ padding: "8px 8px" }}>
+                      <div style={{ fontWeight: 700, color: "var(--text-1)" }}>{row.child_name}</div>
+                      {row.guardian_name && (
+                        <div style={{ fontSize: "0.7rem", color: "var(--text-3)" }}>{row.guardian_name}</div>
+                      )}
+                    </td>
+
+                    {/* Sponsor name */}
+                    <td style={{ padding: "8px 8px", color: "var(--text-2)" }}>{row.sponsor_name}</td>
+
+                    {/* Fixed */}
+                    <td style={{ padding: "8px 8px", textAlign: "center", color: "var(--text-1)", fontWeight: row.newFixed !== row.fixed ? 700 : 400 }}>
+                      {fmt(row.newFixed)}
+                      {row.newFixed !== row.fixed && (
+                        <div style={{ fontSize: "0.65rem", color: "var(--amber)" }}>
+                          كان: {fmt(row.fixed)}
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Extras */}
+                    <td style={{ padding: "8px 8px", textAlign: "center" }}>
+                      {row.newExtras > 0 ? (
+                        <span style={{ color: "var(--amber)", fontWeight: 700 }}>+{fmt(row.newExtras)}</span>
+                      ) : (
+                        <span style={{ color: "var(--text-3)" }}>—</span>
+                      )}
+                    </td>
+
+                    {/* Total */}
+                    <td style={{ padding: "8px 8px", textAlign: "center", fontWeight: 800, color: "var(--text-1)", background: idx % 2 === 0 ? "#EDE8E1" : "#E8E2DA" }}>
+                      {fmt(row.newFixed + row.newExtras)}
+                    </td>
+
+                    {/* Collected */}
+                    <td style={{ padding: "8px 8px", textAlign: "center" }}>
+                      <button
+                        type="button"
+                        onClick={() => updateRow(idx, { collected: !row.collected })}
+                        style={{
+                          background: "none", border: "none", cursor: "pointer",
+                          color: row.collected ? "var(--green)" : "var(--text-3)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          margin: "0 auto",
+                        }}
+                      >
+                        {row.collected
+                          ? <CheckCircle size={18} />
+                          : <Circle size={18} />
+                        }
+                      </button>
+                    </td>
+
+                    {/* Received by */}
+                    <td style={{ padding: "8px 4px", textAlign: "center" }}>
+                      <select
+                        value={row.received_by}
+                        onChange={e => updateRow(idx, { received_by: e.target.value })}
+                        style={{
+                          border: "1px solid var(--border)", borderRadius: 6,
+                          padding: "4px 6px", fontSize: "0.75rem", background: "var(--surface)",
+                          color: row.received_by ? "var(--text-1)" : "var(--text-3)",
+                          minWidth: 72,
+                        }}
+                      >
+                        <option value="">—</option>
+                        {operators.map(o => (
+                          <option key={o.id} value={o.id}>{o.name}</option>
+                        ))}
+                      </select>
+                    </td>
+
+                    {/* Actions */}
+                    <td style={{ padding: "8px 6px", textAlign: "center" }}>
+                      <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                        <button
+                          onClick={() => updateRow(idx, { editing: !row.editing })}
+                          style={{
+                            background: row.editing ? "var(--green-light)" : "var(--surface-2)",
+                            border: "none", borderRadius: 6, cursor: "pointer",
+                            padding: "4px 8px", color: row.editing ? "var(--green)" : "var(--text-3)",
+                          }}
+                          title="تعديل"
+                        >
+                          {row.editing ? <X size={13} /> : <Pencil size={13} />}
+                        </button>
+                        <button
+                          onClick={() => setRows(prev => prev.filter((_, i) => i !== idx))}
+                          style={{
+                            background: "none", border: "none", borderRadius: 6, cursor: "pointer",
+                            padding: "4px 8px", color: "var(--text-3)",
+                          }}
+                          title="حذف"
+                          onMouseEnter={ev => (ev.currentTarget.style.color = "var(--red)")}
+                          onMouseLeave={ev => (ev.currentTarget.style.color = "var(--text-3)")}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {/* Inline edit panel */}
+                  {row.editing && (
+                    <tr key={`${row.sponsorship_id}-edit`} style={{ background: "var(--green-light)", borderBottom: "1px solid var(--border)" }}>
+                      <td colSpan={9} style={{ padding: "12px 16px" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 12, alignItems: "flex-end" }}>
+                          <div>
+                            <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "var(--text-2)", marginBottom: 4 }}>
+                              الكفالة الدائمة (ج)
+                            </label>
+                            <input
+                              type="number"
+                              value={row.newFixed}
+                              onChange={e => updateRow(idx, { newFixed: Number(e.target.value) || row.fixed })}
+                              className="input-field"
+                              dir="ltr"
+                              style={{ fontSize: "0.875rem" }}
+                            />
+                            {row.newFixed !== row.fixed && (
+                              <div style={{ fontSize: "0.68rem", color: "var(--amber)", marginTop: 2 }}>
+                                تغيير دائم: {fmt(row.fixed)} → {fmt(row.newFixed)} ج
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "var(--text-2)", marginBottom: 4 }}>
+                              زيادة هذا الشهر (ج)
+                            </label>
+                            <input
+                              type="number"
+                              value={row.newExtras || ""}
+                              onChange={e => updateRow(idx, { newExtras: Number(e.target.value) || 0 })}
+                              className="input-field"
+                              dir="ltr"
+                              placeholder="0"
+                              style={{ fontSize: "0.875rem" }}
+                            />
+                          </div>
+                          <button
+                            onClick={() => updateRow(idx, { editing: false })}
+                            className="btn btn-primary btn-sm"
+                          >
+                            <Check size={14} /> حفظ
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              ))}
+            </tbody>
+            {/* Grand totals */}
+            <tfoot>
+              <tr style={{ background: "#E4DDD3", fontWeight: 800 }}>
+                <td colSpan={3} style={{ padding: "10px 10px", color: "var(--text-1)" }}>
+                  الإجمالي ({includedRows.length} حالة)
+                </td>
+                <td style={{ padding: "10px 8px", textAlign: "center", color: "var(--text-1)" }}>{fmt(grandFixed)}</td>
+                <td style={{ padding: "10px 8px", textAlign: "center", color: "var(--amber)" }}>
+                  {grandExtras > 0 ? `+${fmt(grandExtras)}` : "—"}
+                </td>
+                <td style={{ padding: "10px 8px", textAlign: "center", fontSize: "1rem", color: "var(--green)" }}>{fmt(grandTotal)}</td>
+                <td colSpan={3}></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        <button onClick={onBack} className="btn btn-secondary" style={{ flex: 1 }}>← تغيير المنطقة</button>
+        <button
+          onClick={saveAndContinue}
+          disabled={saving}
+          className="btn btn-primary"
+          style={{ flex: 2 }}
+        >
+          {saving ? "جاري الحفظ..." : "حفظ ومتابعة ←"}
+        </button>
       </div>
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// STEP 3 — SADAQAT
+// STEP "sadaqat" — SADAQAT
 // ═══════════════════════════════════════════════════════════════════════════════
 function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext: () => void; onBack: () => void }) {
   const [cases,       setCases]       = useState<any[]>([]);
@@ -668,7 +784,7 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
       destination_description: description || reason || null,
       month_year:              monthYear,
       reason:                  reason || null,
-      approved_by:             receivedBy || null,   // now a UUID from the select
+      approved_by:             receivedBy || null,
     }).select("*").single();
 
     if (!error && data) setEntries(prev => [...prev, data]);
@@ -692,7 +808,7 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
 
   return (
     <div>
-      <h2 style={{ marginBottom: 4 }}>٣. الصدقات</h2>
+      <h2 style={{ marginBottom: 4 }}>الصدقات</h2>
       <p style={{ fontSize: "0.82rem", color: "var(--text-3)", marginBottom: 20, margin: "0 0 1.25rem" }}>
         توزيع وارد الصدقات على المستفيدين — {fmtMonth(monthYear)}
       </p>
@@ -912,7 +1028,7 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// STEP 4 — REPORTS
+// STEP "reports" — REPORTS
 // ═══════════════════════════════════════════════════════════════════════════════
 function StepReports({ monthYear, onBack }: { monthYear: string; onBack: () => void }) {
   const [areas,   setAreas]   = useState<Area[]>([]);
@@ -929,7 +1045,7 @@ function StepReports({ monthYear, onBack }: { monthYear: string; onBack: () => v
 
   return (
     <div>
-      <h2 style={{ marginBottom: 4 }}>٤. إصدار التقارير</h2>
+      <h2 style={{ marginBottom: 4 }}>إصدار التقارير</h2>
       <p style={{ fontSize: "0.82rem", color: "var(--text-3)", marginBottom: 24, margin: "0 0 1.5rem" }}>
         كشوف الصرف الشهرية لكل منطقة — {fmtMonth(monthYear)}
       </p>
@@ -952,6 +1068,131 @@ function StepReports({ monthYear, onBack }: { monthYear: string; onBack: () => v
         ))}
       </div>
       <button onClick={onBack} className="btn btn-secondary" style={{ width: "100%" }}>← السابق</button>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN PAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+type PageStep = "area" | "table" | "sadaqat" | "reports";
+
+export default function SettlePage() {
+  const [pageStep,     setPageStep]     = useState<PageStep>("area");
+  const [selectedArea, setSelectedArea] = useState<Area | null>(null);
+  const [monthYear,    setMonthYear]    = useState("");
+
+  function handleAreaMonthSelect(area: Area | null, month: string) {
+    setSelectedArea(area);
+    setMonthYear(month);
+    setPageStep("table");
+  }
+
+  function resetToArea() {
+    setPageStep("area");
+    setSelectedArea(null);
+    setMonthYear("");
+  }
+
+  const STEPS = [
+    { id: "table",   n: 1, label: "الكفالات" },
+    { id: "sadaqat", n: 2, label: "الصدقات"  },
+    { id: "reports", n: 3, label: "التقارير" },
+  ] as const;
+
+  const currentStepN = STEPS.find(s => s.id === pageStep)?.n || 0;
+
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
+      <header className="app-header">
+        <Link href="/" className="btn btn-ghost btn-sm" style={{ gap: 4 }}>
+          <ArrowRight size={18} />
+        </Link>
+        <div style={{ flex: 1, paddingRight: 12 }}>
+          <div className="app-logo" style={{ fontSize: "1.1rem" }}>تسوية الشهر</div>
+        </div>
+      </header>
+
+      <div style={{ maxWidth: 820, margin: "0 auto", padding: "1.25rem 1rem 0" }}>
+
+        {/* Area + month summary bar (shown after area step) */}
+        {pageStep !== "area" && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 12, marginBottom: 20,
+            background: "var(--surface)", borderRadius: "var(--radius)",
+            border: "1px solid var(--border)", padding: "0.6rem 1rem",
+            fontSize: "0.82rem",
+          }}>
+            <MapPin size={14} style={{ color: "var(--indigo)", flexShrink: 0 }} />
+            <span style={{ fontWeight: 700, color: "var(--text-1)" }}>
+              {selectedArea ? selectedArea.name : "إدخال يدوي"}
+            </span>
+            <span style={{ color: "var(--text-3)" }}>—</span>
+            <span style={{ color: "var(--text-2)" }}>{fmtMonth(monthYear)}</span>
+            <button
+              onClick={resetToArea}
+              style={{ marginRight: "auto", background: "none", border: "none", cursor: "pointer", color: "var(--text-3)", fontSize: "0.78rem", textDecoration: "underline" }}
+            >
+              تغيير
+            </button>
+          </div>
+        )}
+
+        {/* Step indicator (only when past area step) */}
+        {pageStep !== "area" && (
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 24 }}>
+            {STEPS.map((s, i) => (
+              <div key={s.n} style={{ display: "flex", flex: 1, alignItems: "center" }}>
+                <div style={{
+                  width: 30, height: 30, borderRadius: "50%",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: "0.8rem", fontWeight: 800, flexShrink: 0,
+                  background: currentStepN >= s.n ? "var(--green)" : "var(--border)",
+                  color:      currentStepN >= s.n ? "white"        : "var(--text-3)",
+                }}>
+                  {currentStepN > s.n ? <Check size={14} /> : s.n}
+                </div>
+                <span style={{
+                  fontSize: "0.7rem", marginRight: 6,
+                  fontWeight: currentStepN >= s.n ? 700 : 400,
+                  color: currentStepN >= s.n ? "var(--text-1)" : "var(--text-3)",
+                  whiteSpace: "nowrap",
+                }}>{s.label}</span>
+                {i < STEPS.length - 1 && (
+                  <div style={{ flex: 1, height: 2, margin: "0 6px", borderRadius: 2, background: currentStepN > s.n ? "var(--green)" : "var(--border)" }} />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <main style={{ maxWidth: 820, margin: "0 auto", padding: "0 1rem 3rem" }}>
+        {pageStep === "area" && (
+          <AreaMonthStep onSelect={handleAreaMonthSelect} />
+        )}
+        {pageStep === "table" && (
+          <SettlementTable
+            area={selectedArea}
+            monthYear={monthYear}
+            onNext={() => setPageStep("sadaqat")}
+            onBack={resetToArea}
+          />
+        )}
+        {pageStep === "sadaqat" && (
+          <StepSadaqat
+            monthYear={monthYear}
+            onNext={() => setPageStep("reports")}
+            onBack={() => setPageStep("table")}
+          />
+        )}
+        {pageStep === "reports" && (
+          <StepReports
+            monthYear={monthYear}
+            onBack={() => setPageStep("sadaqat")}
+          />
+        )}
+      </main>
     </div>
   );
 }
