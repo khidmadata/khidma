@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import {
   Users, DollarSign, TrendingUp, TrendingDown, Building2,
-  Search, Plus, FileText, ChevronDown
+  Search, Plus, FileText, ChevronDown, ClipboardList
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -160,7 +160,7 @@ export default function Home() {
     setMonthLoading(true);
     Promise.all([
       supabase.from("collections").select("sponsor_id, amount")
-        .eq("month_year", selectedMonth).eq("status", "confirmed"),
+        .eq("month_year", selectedMonth).in("status", ["paid", "confirmed"]),
       supabase.from("disbursements").select("area_id, fixed_total, extras_total")
         .eq("month_year", selectedMonth),
     ]).then(([collRes, disbRes]) => {
@@ -295,7 +295,7 @@ export default function Home() {
         {/* Desktop actions */}
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <div className="hidden md:flex" style={{ display: "flex", gap: 8 }}>
-            <Link href="/collect"  className="btn btn-primary btn-sm"><Plus size={15} />تحصيل</Link>
+            <Link href="/tahseel"  className="btn btn-secondary btn-sm"><ClipboardList size={15} />التحصيل</Link>
             <Link href="/register" className="btn btn-secondary btn-sm"><Plus size={15} />تسجيل</Link>
             <Link href="/settle"   className="btn btn-secondary btn-sm"><FileText size={15} />تسوية الشهر</Link>
           </div>

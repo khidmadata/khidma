@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { ArrowRight, UserPlus, Heart, HandHeart, CheckCircle, Loader2 } from "lucide-react";
+import { ArrowRight, UserPlus, Heart, CheckCircle, Loader2 } from "lucide-react";
 import Link from "next/link";
 
 type Area     = { id: string; name: string };
@@ -10,7 +10,7 @@ type Operator = { id: string; name: string };
 type Sponsor  = { id: string; legacy_id: number; name: string };
 
 export default function RegisterPage() {
-  const [tab,       setTab]       = useState<"sponsor" | "case" | "sadaqat">("sponsor");
+  const [tab,       setTab]       = useState<"sponsor" | "case">("sponsor");
   const [areas,     setAreas]     = useState<Area[]>([]);
   const [operators, setOperators] = useState<Operator[]>([]);
   const [sponsors,  setSponsors]  = useState<Sponsor[]>([]);
@@ -29,9 +29,8 @@ export default function RegisterPage() {
   }, []);
 
   const TABS = [
-    { id: "sponsor" as const, label: "كفيل جديد",   Icon: UserPlus,  desc: "تسجيل كفيل" },
-    { id: "case"    as const, label: "كفالة جديدة",  Icon: Heart,     desc: "ربط حالة"   },
-    { id: "sadaqat" as const, label: "حالة صدقات",   Icon: HandHeart, desc: "تسجيل حالة" },
+    { id: "sponsor" as const, label: "كفيل جديد",  Icon: UserPlus, desc: "تسجيل كفيل" },
+    { id: "case"    as const, label: "كفالة جديدة", Icon: Heart,    desc: "ربط حالة"   },
   ];
 
   return (
@@ -42,7 +41,7 @@ export default function RegisterPage() {
         </Link>
         <div style={{ flex: 1, paddingRight: 12 }}>
           <div className="app-logo" style={{ fontSize: "1.1rem" }}>تسجيل جديد</div>
-          <span className="app-logo-sub">إضافة كفيل أو كفالة أو حالة صدقات</span>
+          <span className="app-logo-sub">إضافة كفيل أو كفالة جديدة</span>
         </div>
       </header>
 
@@ -65,7 +64,6 @@ export default function RegisterPage() {
 
         {tab === "sponsor" && <NewSponsorForm operators={operators} sponsors={sponsors} onSaved={s => setSponsors(prev => [...prev, s])} />}
         {tab === "case"    && <NewCaseForm    areas={areas} sponsors={sponsors} />}
-        {tab === "sadaqat" && <NewSadaqatCauseForm areas={areas} />}
       </main>
     </div>
   );
@@ -317,80 +315,3 @@ function NewCaseForm({ areas, sponsors }: { areas: Area[]; sponsors: Sponsor[] }
   );
 }
 
-// ─── New Sadaqat Cause ─────────────────────────────────────────────────────
-function NewSadaqatCauseForm({ areas }: { areas: Area[] }) {
-  const [name,     setName]     = useState("");
-  const [details,  setDetails]  = useState("");
-  const [location, setLocation] = useState("");
-  const [cause,    setCause]    = useState("");
-  const [areaId,   setAreaId]   = useState("");
-  const [priority, setPriority] = useState("5");
-  const [saving,   setSaving]   = useState(false);
-  const [saved,    setSaved]    = useState(false);
-
-  async function save() {
-    if (!name.trim()) return;
-    setSaving(true);
-    const { error } = await supabase.from("sadaqat_causes").insert({
-      name: name.trim(), details: details || null, location: location || null,
-      cause: cause || null, area_id: areaId || null,
-      priority_rank: Number(priority), is_active: true,
-    });
-    if (error) { alert("خطأ: " + error.message); setSaving(false); return; }
-    setSaving(false); setSaved(true);
-  }
-
-  function reset() { setName(""); setDetails(""); setLocation(""); setCause(""); setAreaId(""); setPriority("5"); setSaved(false); }
-
-  if (saved) return <SuccessMsg msg={`تم تسجيل حالة صدقات: ${name}`} onAgain={reset} />;
-
-  return (
-    <div className="card">
-      <h3 style={{ marginBottom: 20 }}>تسجيل حالة صدقات جديدة</h3>
-      <div style={{ display: "grid", gap: 14 }}>
-        <Field label="اسم المستفيد *" value={name}    onChange={setName}    placeholder="الاسم" />
-        <Field label="التفاصيل"        value={details} onChange={setDetails} placeholder="تفاصيل الحالة..." multiline />
-        <Field label="الموقع / العنوان" value={location} onChange={setLocation} placeholder="مثل: المقطم، حلوان..." />
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <div>
-            <label className="field-label">المنطقة</label>
-            <select value={areaId} onChange={e => setAreaId(e.target.value)} className="select-field">
-              <option value="">غير محدد</option>
-              {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="field-label">السبب</label>
-            <select value={cause} onChange={e => setCause(e.target.value)} className="select-field">
-              <option value="">اختر...</option>
-              <option value="medical">حالة مرضية</option>
-              <option value="school">مصاريف دراسية</option>
-              <option value="urgent">حاجة طارئة</option>
-              <option value="seasonal">مناسبة موسمية</option>
-              <option value="food">مساعدات غذائية</option>
-              <option value="rent">إيجار / سكن</option>
-              <option value="other">أخرى</option>
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label className="field-label">الأولوية (1 = أعلى)</label>
-          <select value={priority} onChange={e => setPriority(e.target.value)} className="select-field">
-            {[1,2,3,4,5,6,7,8,9,10].map(n => (
-              <option key={n} value={n}>{n} {n === 1 ? "— عاجل جداً" : n <= 3 ? "— عالي" : n <= 5 ? "— متوسط" : "— منخفض"}</option>
-            ))}
-          </select>
-        </div>
-
-        <button onClick={save} disabled={saving || !name.trim()} className="btn btn-primary btn-lg"
-          style={{ background: "var(--amber)" }}>
-          {saving
-            ? <><Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> جاري الحفظ...</>
-            : "✓ تسجيل حالة الصدقات"}
-        </button>
-      </div>
-    </div>
-  );
-}

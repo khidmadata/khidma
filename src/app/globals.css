@@ -58,9 +58,7 @@ body {
   padding-bottom: 68px;
 }
 
-@media (min-width: 768px) {
-  body { padding-bottom: 0; }
-}
+/* bottom nav is always visible — body keeps its padding-bottom */
 
 * { box-sizing: border-box; }
 
@@ -422,9 +420,7 @@ label.field-label {
 
 .bottom-nav-item.active { color: var(--green); }
 
-@media (min-width: 768px) {
-  .bottom-nav { display: none; }
-}
+/* bottom-nav visible on all screen sizes */
 
 /* ─────────────────────────────────────
    SEARCH DROPDOWN
