@@ -240,10 +240,15 @@ export default function Home() {
     return bd;
   }, [sponsorships]);
 
-  // Area breakdown for selected month — uses historical disbursements when available
+  // Area breakdown for selected month — all areas always shown; settled areas use disbursement data
   const areaBreakdownForMonth = useMemo(() => {
-    if (selectedMonth !== "all" && monthDisbursements.length > 0) {
-      const bd: Record<string, { cases: number; total: number; fixed: number; extras: number }> = {};
+    // Start with all areas that have active sponsorships as baseline
+    const bd: Record<string, { cases: number; total: number; fixed: number; extras: number }> = {};
+    Object.entries(areaBreakdown).forEach(([aId, data]) => {
+      bd[aId] = { cases: data.cases, total: data.total, fixed: data.total, extras: 0 };
+    });
+    // Overlay with historical disbursement data for the selected month
+    if (selectedMonth !== "all") {
       monthDisbursements.forEach(d => {
         bd[d.area_id] = {
           cases: areaBreakdown[d.area_id]?.cases || 0,
@@ -252,13 +257,7 @@ export default function Home() {
           total: Number(d.fixed_total) + Number(d.extras_total),
         };
       });
-      return bd;
     }
-    // Fallback: current sponsorships (no extras breakdown for "all")
-    const bd: Record<string, { cases: number; total: number; fixed: number; extras: number }> = {};
-    Object.entries(areaBreakdown).forEach(([aId, data]) => {
-      bd[aId] = { cases: data.cases, total: data.total, fixed: data.total, extras: 0 };
-    });
     return bd;
   }, [selectedMonth, monthDisbursements, areaBreakdown]);
 
