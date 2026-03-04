@@ -1326,12 +1326,18 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
           </h3>
           {bulkMode === "none" ? (
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setBulkMode("uniform")} className="btn btn-secondary" style={{ flex: 1, fontSize: "0.82rem" }}>
-                موحد للكل
-              </button>
-              <button onClick={() => setBulkMode("byType")} className="btn btn-secondary" style={{ flex: 1, fontSize: "0.82rem" }}>
-                حسب نوع الحالة
-              </button>
+              {([["uniform","موحد للكل"],["byType","حسب نوع الحالة"]] as [string,string][]).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  onClick={() => setBulkMode(mode as "uniform" | "byType")}
+                  style={{
+                    flex: 1, padding: "0.7rem", borderRadius: "var(--radius)",
+                    border: "2px solid var(--green)",
+                    background: "var(--green-light)", color: "var(--green)",
+                    fontWeight: 700, fontSize: "0.875rem", cursor: "pointer",
+                  }}
+                >{label}</button>
+              ))}
             </div>
           ) : (
             <div>
@@ -1373,7 +1379,7 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
                 </div>
               )}
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => { setBulkMode("none"); setUniformAmount(""); setAmountByType({}); }} className="btn btn-secondary" style={{ flex: 1 }}>
+                <button onClick={() => { setBulkMode("none"); setUniformAmount(""); setAmountByType({}); }} className="btn" style={{ flex: 1, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text-2)" }}>
                   إلغاء
                 </button>
                 <button

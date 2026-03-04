@@ -64,11 +64,20 @@ type Entry = {
   donor_name: string | null;
   destination_description: string | null;
   destination_case_id: string | null;
+  approved_by: string | null;
   month_year: string;
   created_at: string;
 };
 
-type Case = { id: string; child_name: string; guardian_name: string | null };
+type Case     = { id: string; child_name: string; guardian_name: string | null };
+type Operator = { id: string; name: string };
+type Area     = { id: string; name: string };
+type AreaCase = { id: string; child_name: string; guardian_name: string | null; case_type: string };
+
+const CASE_TYPE_LABELS: Record<string, string> = {
+  orphan: "كفالة يتيم", vulnerable: "كفالة يتيم",
+  student: "طالب علم", medical: "حالات مرضية", special: "حالات خاصة",
+};
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function SadaqatPage() {
@@ -77,28 +86,35 @@ export default function SadaqatPage() {
   const [entries, setEntries]           = useState<Entry[]>([]);
   const [cases, setCases]               = useState<Case[]>([]);
   const [caseMap, setCaseMap]           = useState<Record<string, string>>({});
+  const [operators, setOperators]       = useState<Operator[]>([]);
+  const [areas, setAreas]               = useState<Area[]>([]);
   const [loading, setLoading]           = useState(true);
   const [reload, setReload]             = useState(0);
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
 
   const monthOptions = useMemo(genMonths, []);
+  const opMap = useMemo(() => Object.fromEntries(operators.map(o => [o.id, o.name])), [operators]);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [entRes, casRes] = await Promise.all([
+      const [entRes, casRes, opRes, arRes] = await Promise.all([
         supabase.from("sadaqat_pool")
-          .select("id, transaction_type, amount, destination_type, donor_name, destination_description, destination_case_id, month_year, created_at")
+          .select("id, transaction_type, amount, destination_type, donor_name, destination_description, destination_case_id, approved_by, month_year, created_at")
           .order("created_at", { ascending: false }),
         supabase.from("cases")
           .select("id, child_name, guardian_name")
           .eq("status", "active")
           .order("child_name"),
+        supabase.from("operators").select("id, name").neq("name", "شريف"),
+        supabase.from("areas").select("id, name").eq("is_active", true).order("name"),
       ]);
 
       const casesData: Case[] = casRes.data || [];
       setCases(casesData);
       setCaseMap(Object.fromEntries(casesData.map(c => [c.id, c.child_name])));
+      setOperators(opRes.data || []);
+      setAreas(arRes.data || []);
 
       setEntries(
         (entRes.data || []).map((e: any) => ({
@@ -186,13 +202,24 @@ export default function SadaqatPage() {
         {loading ? (
           <div style={{ textAlign: "center", padding: "3rem", color: "var(--text-3)" }}>جاري التحميل...</div>
         ) : tab === "entries" ? (
-          <EntriesView inflows={inflows} outflows={outflows} caseMap={caseMap} selectedMonth={selectedMonth} onEditRequest={setEditingEntry} />
+          <EntriesView inflows={inflows} outflows={outflows} caseMap={caseMap} opMap={opMap} selectedMonth={selectedMonth} onEditRequest={setEditingEntry} />
         ) : tab === "add" ? (
-          <AddForm
-            cases={cases}
-            defaultMonth={selectedMonth === "all" ? currentMonth() : selectedMonth}
-            onSaved={() => { setReload(r => r + 1); setTab("entries"); }}
-          />
+          <>
+            <AddForm
+              cases={cases}
+              operators={operators}
+              defaultMonth={selectedMonth === "all" ? currentMonth() : selectedMonth}
+              onSaved={() => { setReload(r => r + 1); setTab("entries"); }}
+            />
+            <BulkDistributeSection
+              areas={areas}
+              selectedMonth={selectedMonth === "all" ? currentMonth() : selectedMonth}
+              onSaved={newEntries => {
+                setEntries(prev => [...newEntries.map(e => ({ ...e, cause: e.destination_type ?? null })), ...prev]);
+                setTab("entries");
+              }}
+            />
+          </>
         ) : (
           <ReportView
             entries={filtered}
@@ -205,9 +232,15 @@ export default function SadaqatPage() {
       {editingEntry && (
         <EditEntryForm
           entry={editingEntry}
+          operators={operators}
+          opMap={opMap}
           onClose={() => setEditingEntry(null)}
           onSaved={updated => {
             setEntries(prev => prev.map(e => e.id === updated.id ? { ...e, ...updated } : e));
+            setEditingEntry(null);
+          }}
+          onDelete={id => {
+            setEntries(prev => prev.filter(e => e.id !== id));
             setEditingEntry(null);
           }}
         />
@@ -217,8 +250,9 @@ export default function SadaqatPage() {
 }
 
 // ─── Entries View ─────────────────────────────────────────────────────────────
-function EntriesView({ inflows, outflows, caseMap, selectedMonth, onEditRequest }: {
-  inflows: Entry[]; outflows: Entry[]; caseMap: Record<string, string>; selectedMonth: string;
+function EntriesView({ inflows, outflows, caseMap, opMap, selectedMonth, onEditRequest }: {
+  inflows: Entry[]; outflows: Entry[]; caseMap: Record<string, string>;
+  opMap: Record<string, string>; selectedMonth: string;
   onEditRequest: (e: Entry) => void;
 }) {
   const [view, setView] = useState<"inflows" | "outflows">("inflows");
@@ -273,6 +307,11 @@ function EntriesView({ inflows, outflows, caseMap, selectedMonth, onEditRequest 
                         الحالة: {caseMap[e.destination_case_id]}
                       </div>
                     )}
+                    {e.approved_by && opMap[e.approved_by] && (
+                      <div style={{ fontSize: "0.68rem", color: "var(--text-3)", marginTop: 2 }}>
+                        {view === "inflows" ? "استلمه" : "وزَّعه"}: <strong style={{ color: "var(--text-2)" }}>{opMap[e.approved_by]}</strong>
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                     <div style={{ fontWeight: 800, fontSize: "1.05rem", color: view === "inflows" ? "var(--green)" : "var(--red)" }}>
@@ -322,8 +361,8 @@ function CauseBadge({ cause }: { cause: string }) {
 }
 
 // ─── Add Form ─────────────────────────────────────────────────────────────────
-function AddForm({ cases, defaultMonth, onSaved }: {
-  cases: Case[]; defaultMonth: string; onSaved: () => void;
+function AddForm({ cases, operators, defaultMonth, onSaved }: {
+  cases: Case[]; operators: Operator[]; defaultMonth: string; onSaved: () => void;
 }) {
   const [type,         setType]         = useState<"inflow" | "outflow">("inflow");
   const [amount,       setAmount]       = useState("");
@@ -335,6 +374,7 @@ function AddForm({ cases, defaultMonth, onSaved }: {
   const [showCaseDrop, setShowCaseDrop] = useState(false);
   const [month,        setMonth]        = useState(defaultMonth);
   const [notes,        setNotes]        = useState("");
+  const [receivedBy,   setReceivedBy]   = useState("");
   const [saving,       setSaving]       = useState(false);
   const [savedOk,      setSavedOk]      = useState(false);
 
@@ -358,6 +398,7 @@ function AddForm({ cases, defaultMonth, onSaved }: {
       donor_name:              type === "inflow" ? (donorName.trim() || null) : null,
       destination_description: (description.trim() || notes.trim()) || null,
       destination_case_id:     caseId || null,
+      approved_by:             receivedBy || null,
       month_year:              month,
     });
     if (error) { alert("خطأ: " + error.message); setSaving(false); return; }
@@ -368,7 +409,7 @@ function AddForm({ cases, defaultMonth, onSaved }: {
 
   function reset() {
     setType("inflow"); setAmount(""); setCause(""); setDonorName(""); setDescription("");
-    setCaseSearch(""); setCaseId(""); setNotes(""); setSavedOk(false);
+    setCaseSearch(""); setCaseId(""); setNotes(""); setReceivedBy(""); setSavedOk(false);
   }
 
   if (savedOk) return (
@@ -489,6 +530,15 @@ function AddForm({ cases, defaultMonth, onSaved }: {
               <X size={12} /> إزالة الربط
             </button>
           )}
+        </div>
+
+        {/* Received / disbursed by */}
+        <div>
+          <label className="field-label">{type === "inflow" ? "استلمه" : "وزَّعه"}</label>
+          <select value={receivedBy} onChange={e => setReceivedBy(e.target.value)} className="select-field">
+            <option value="">— اختر المسئول —</option>
+            {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
         </div>
 
         {/* Notes */}
@@ -650,16 +700,21 @@ function ReportView({ entries, totalIn, totalOut, balance, caseMap, selectedMont
 }
 
 // ─── Edit Entry Form (modal) ───────────────────────────────────────────────────
-function EditEntryForm({ entry, onClose, onSaved }: {
+function EditEntryForm({ entry, operators, opMap, onClose, onSaved, onDelete }: {
   entry: Entry;
+  operators: Operator[];
+  opMap: Record<string, string>;
   onClose: () => void;
   onSaved: (updated: Entry) => void;
+  onDelete: (id: string) => void;
 }) {
   const [amount,      setAmount]      = useState(String(entry.amount));
   const [cause,       setCause]       = useState(entry.cause || "");
   const [donorName,   setDonorName]   = useState(entry.donor_name || "");
   const [description, setDescription] = useState(entry.destination_description || "");
+  const [receivedBy,  setReceivedBy]  = useState(entry.approved_by || "");
   const [saving,      setSaving]      = useState(false);
+  const [deleting,    setDeleting]    = useState(false);
 
   async function save() {
     if (!amount || Number(amount) <= 0) return;
@@ -669,9 +724,18 @@ function EditEntryForm({ entry, onClose, onSaved }: {
       destination_type:        cause || null,
       donor_name:              entry.transaction_type === "inflow" ? (donorName.trim() || null) : null,
       destination_description: description.trim() || null,
+      approved_by:             receivedBy || null,
     }).eq("id", entry.id);
     if (error) { alert("خطأ: " + error.message); setSaving(false); return; }
-    onSaved({ ...entry, amount: Number(amount), cause, donor_name: donorName, destination_description: description });
+    onSaved({ ...entry, amount: Number(amount), cause, donor_name: donorName, destination_description: description, approved_by: receivedBy || null });
+  }
+
+  async function deleteEntry() {
+    if (!confirm("هل تريد حذف هذا القيد نهائياً؟")) return;
+    setDeleting(true);
+    const { error } = await supabase.from("sadaqat_pool").delete().eq("id", entry.id);
+    if (error) { alert("خطأ: " + error.message); setDeleting(false); return; }
+    onDelete(entry.id);
   }
 
   return (
@@ -707,14 +771,183 @@ function EditEntryForm({ entry, onClose, onSaved }: {
               <input value={description} onChange={e => setDescription(e.target.value)} className="input-field" />
             </div>
           )}
+          <div>
+            <label className="field-label">{entry.transaction_type === "inflow" ? "استلمه" : "وزَّعه"}</label>
+            <select value={receivedBy} onChange={e => setReceivedBy(e.target.value)} className="select-field">
+              <option value="">— اختر المسئول —</option>
+              {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <button onClick={onClose} className="btn btn-secondary" style={{ flex: 1 }}>إلغاء</button>
+            <button onClick={deleteEntry} disabled={deleting} className="btn" style={{ flex: 1, border: "1.5px solid var(--red)", color: "var(--red)", background: "var(--red-light)" }}>
+              {deleting ? "..." : "حذف"}
+            </button>
             <button onClick={save} disabled={saving || !amount || Number(amount) <= 0} className="btn btn-primary" style={{ flex: 2 }}>
               {saving ? "جاري الحفظ..." : "حفظ التعديل"}
             </button>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Bulk Distribute Section ──────────────────────────────────────────────────
+function BulkDistributeSection({ areas, selectedMonth, onSaved }: {
+  areas: Area[];
+  selectedMonth: string;
+  onSaved: (entries: any[]) => void;
+}) {
+  const [expanded,      setExpanded]      = useState(false);
+  const [selectedArea,  setSelectedArea]  = useState<Area | null>(null);
+  const [areaCases,     setAreaCases]     = useState<AreaCase[]>([]);
+  const [loadingCases,  setLoadingCases]  = useState(false);
+  const [bulkMode,      setBulkMode]      = useState<"none" | "uniform" | "byType">("none");
+  const [uniformAmount, setUniformAmount] = useState("");
+  const [amountByType,  setAmountByType]  = useState<Record<string, string>>({});
+  const [saving,        setSaving]        = useState(false);
+
+  async function pickArea(area: Area) {
+    setSelectedArea(area);
+    setBulkMode("none"); setUniformAmount(""); setAmountByType({});
+    setLoadingCases(true);
+    const { data } = await supabase.from("cases").select("id, child_name, guardian_name, case_type").eq("area_id", area.id).eq("status", "active");
+    setAreaCases(data || []);
+    setLoadingCases(false);
+  }
+
+  const caseTypes = useMemo(() => [...new Set(areaCases.map(c => c.case_type))], [areaCases]);
+
+  const bulkPreview = useMemo(() => {
+    if (bulkMode === "uniform" && uniformAmount && Number(uniformAmount) > 0)
+      return areaCases.map(c => ({ ...c, distAmount: Number(uniformAmount) }));
+    if (bulkMode === "byType")
+      return areaCases.filter(c => amountByType[c.case_type] && Number(amountByType[c.case_type]) > 0)
+        .map(c => ({ ...c, distAmount: Number(amountByType[c.case_type]) }));
+    return [] as (AreaCase & { distAmount: number })[];
+  }, [bulkMode, uniformAmount, amountByType, areaCases]);
+
+  const bulkTotal = bulkPreview.reduce((s, c) => s + c.distAmount, 0);
+
+  async function apply() {
+    if (bulkPreview.length === 0 || saving) return;
+    setSaving(true);
+    const inserts = bulkPreview.map(c => ({
+      transaction_type:        "outflow",
+      amount:                  c.distAmount,
+      destination_type:        "kafala_case",
+      destination_case_id:     c.id,
+      destination_description: `${c.child_name}${c.guardian_name ? ` (${c.guardian_name})` : ""} — توزيع جماعي`,
+      month_year:              selectedMonth,
+    }));
+    const { data, error } = await supabase.from("sadaqat_pool").insert(inserts).select("*");
+    if (error) { alert("خطأ: " + error.message); setSaving(false); return; }
+    onSaved(data || []);
+    setExpanded(false); setSelectedArea(null); setAreaCases([]); setBulkMode("none");
+    setUniformAmount(""); setAmountByType({});
+    setSaving(false);
+  }
+
+  const fmt = (n: number) => n.toLocaleString("en");
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <button
+        onClick={() => setExpanded(e => !e)}
+        style={{ width: "100%", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", padding: 0 }}
+      >
+        <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--green)" }}>توزيع جماعي من الصندوق</span>
+        <span style={{ fontSize: "1.2rem", color: "var(--text-3)" }}>{expanded ? "▲" : "▼"}</span>
+      </button>
+
+      {expanded && (
+        <div style={{ marginTop: 14 }}>
+          {/* Area selector */}
+          <div style={{ marginBottom: 12 }}>
+            <label className="field-label">اختر المنطقة</label>
+            <select
+              value={selectedArea?.id || ""}
+              onChange={e => { const a = areas.find(x => x.id === e.target.value); if (a) pickArea(a); }}
+              className="select-field"
+            >
+              <option value="">— اختر منطقة —</option>
+              {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+
+          {loadingCases && <div style={{ textAlign: "center", color: "var(--text-3)", padding: "1rem" }}>جاري التحميل...</div>}
+
+          {selectedArea && !loadingCases && areaCases.length > 0 && (
+            <div>
+              <div style={{ fontSize: "0.78rem", color: "var(--text-3)", marginBottom: 10 }}>
+                {areaCases.length} حالة نشطة في {selectedArea.name} — شهر: <strong style={{ color: "var(--text-2)" }}>{selectedMonth}</strong>
+              </div>
+
+              {bulkMode === "none" ? (
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  {([["uniform","موحد للكل"],["byType","حسب نوع الحالة"]] as [string,string][]).map(([mode, label]) => (
+                    <button key={mode} onClick={() => setBulkMode(mode as "uniform" | "byType")} style={{
+                      flex: 1, padding: "0.7rem", borderRadius: "var(--radius)",
+                      border: "2px solid var(--green)", background: "var(--green-light)", color: "var(--green)",
+                      fontWeight: 700, fontSize: "0.875rem", cursor: "pointer",
+                    }}>{label}</button>
+                  ))}
+                </div>
+              ) : (
+                <div>
+                  {bulkMode === "uniform" && (
+                    <div style={{ marginBottom: 12 }}>
+                      <label className="field-label">مبلغ لكل حالة (ج)</label>
+                      <input type="number" value={uniformAmount} onChange={e => setUniformAmount(e.target.value)}
+                        className="input-field" dir="ltr" placeholder="0" />
+                      {uniformAmount && Number(uniformAmount) > 0 && (
+                        <div style={{ marginTop: 6, fontSize: "0.78rem", color: "var(--text-2)" }}>
+                          {areaCases.length} حالة × {fmt(Number(uniformAmount))} ج = <strong style={{ color: "var(--green)" }}>{fmt(areaCases.length * Number(uniformAmount))} ج</strong>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {bulkMode === "byType" && (
+                    <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                      {caseTypes.map(type => (
+                        <div key={type} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ flex: 1, fontSize: "0.85rem" }}>
+                            {CASE_TYPE_LABELS[type] || type}
+                            <span style={{ color: "var(--text-3)", marginRight: 4, fontSize: "0.75rem" }}>({areaCases.filter(c => c.case_type === type).length})</span>
+                          </span>
+                          <input type="number" value={amountByType[type] || ""} onChange={e => setAmountByType(p => ({ ...p, [type]: e.target.value }))}
+                            className="input-field" dir="ltr" placeholder="0" style={{ width: 110 }} />
+                        </div>
+                      ))}
+                      {bulkTotal > 0 && (
+                        <div style={{ fontSize: "0.78rem", color: "var(--text-2)", paddingTop: 4, borderTop: "1px solid var(--border-light)" }}>
+                          الإجمالي: <strong style={{ color: "var(--green)" }}>{fmt(bulkTotal)} ج</strong> — {bulkPreview.length} حالة
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => { setBulkMode("none"); setUniformAmount(""); setAmountByType({}); }}
+                      className="btn" style={{ flex: 1, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text-2)" }}>
+                      إلغاء
+                    </button>
+                    <button onClick={apply} disabled={saving || bulkPreview.length === 0 || bulkTotal === 0}
+                      className="btn btn-primary" style={{ flex: 2, background: "var(--green)" }}>
+                      {saving ? "جاري الحفظ..." : `توزيع ${fmt(bulkTotal)} ج على ${bulkPreview.length} حالة ✓`}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {selectedArea && !loadingCases && areaCases.length === 0 && (
+            <div style={{ textAlign: "center", color: "var(--text-3)", padding: "1rem", fontSize: "0.85rem" }}>
+              لا توجد حالات نشطة في هذه المنطقة
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
