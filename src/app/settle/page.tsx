@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-  LayoutDashboard, Check, Trash2, CheckCircle, Circle,
+  LayoutDashboard, Check, Trash2,
   FileText, AlertCircle, Pencil, X, Plus, MapPin,
 } from "lucide-react";
 import Link from "next/link";
@@ -249,6 +249,7 @@ function SettlementTable({
   const [addSearch, setAddSearch] = useState("");
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [addMode, setAddMode] = useState<"existing" | "new">("existing");
+  const [rowSearch, setRowSearch] = useState("");
 
   // New case form state
   const [newChildName,    setNewChildName]    = useState("");
@@ -256,6 +257,8 @@ function SettlementTable({
   const [newSponsorName,  setNewSponsorName]  = useState("");
   const [newFixed,        setNewFixed]        = useState("");
   const [newCaseType,     setNewCaseType]     = useState("orphan");
+  const [newDOB,          setNewDOB]          = useState("");
+  const [newNotes,        setNewNotes]        = useState("");
   const [addingNew,       setAddingNew]       = useState(false);
 
   useEffect(() => {
@@ -400,11 +403,13 @@ function SettlementTable({
     const { data: newCase, error: cErr } = await supabase
       .from("cases")
       .insert({
-        child_name:    newChildName.trim(),
-        guardian_name: newGuardianName.trim() || null,
-        area_id:       area?.id || null,
-        case_type:     newCaseType,
-        status:        "active",
+        child_name:      newChildName.trim(),
+        guardian_name:   newGuardianName.trim() || null,
+        area_id:         area?.id || null,
+        case_type:       newCaseType,
+        date_of_birth:   newDOB || null,
+        additional_info: newNotes.trim() || null,
+        status:          "active",
       })
       .select("id")
       .single();
@@ -440,7 +445,7 @@ function SettlementTable({
 
     // Reset form
     setNewChildName(""); setNewGuardianName(""); setNewSponsorName("");
-    setNewFixed(""); setNewCaseType("orphan");
+    setNewFixed(""); setNewCaseType("orphan"); setNewDOB(""); setNewNotes("");
     setShowAddPanel(false);
     setAddingNew(false);
   }
@@ -634,11 +639,21 @@ function SettlementTable({
     );
   }
 
-  const includedRows = rows.filter(r => r.included);
-  const grandFixed   = includedRows.reduce((s, r) => s + r.newFixed, 0);
-  const grandExtras  = includedRows.reduce((s, r) => s + r.newExtras, 0);
-  const grandTotal   = grandFixed + grandExtras;
-  const allIncluded  = rows.length > 0 && rows.every(r => r.included);
+  const includedRows  = rows.filter(r => r.included);
+  const grandFixed    = includedRows.reduce((s, r) => s + r.newFixed, 0);
+  const grandExtras   = includedRows.reduce((s, r) => s + r.newExtras, 0);
+  const grandTotal    = grandFixed + grandExtras;
+  const allIncluded   = rows.length > 0 && rows.every(r => r.included);
+  const allCollected  = rows.length > 0 && rows.every(r => r.collected);
+
+  const q = rowSearch.trim();
+  const visibleRows = q
+    ? rows.filter(r =>
+        r.child_name.includes(q) ||
+        (r.guardian_name || "").includes(q) ||
+        r.sponsor_name.includes(q)
+      )
+    : rows;
 
   // Sponsorships not already in the table (for add-case search)
   const addableSps = allSponsorships.filter(sp => !rows.find(r => r.sponsorship_id === sp.id));
@@ -724,23 +739,46 @@ function SettlementTable({
                   </select>
                 </div>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "flex-end" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
                   <label className="field-label">مبلغ الكفالة الشهري (ج) *</label>
                   <input type="number" value={newFixed} onChange={e => setNewFixed(e.target.value)}
                     className="input-field" dir="ltr" placeholder="0" />
                 </div>
-                <button
-                  onClick={createNewCase}
-                  disabled={addingNew || !newChildName.trim() || !newSponsorName.trim() || !newFixed || Number(newFixed) <= 0}
-                  className="btn btn-primary"
-                  style={{ whiteSpace: "nowrap" }}
-                >
-                  {addingNew ? "جاري الحفظ..." : "+ إنشاء وإضافة"}
-                </button>
+                <div>
+                  <label className="field-label">تاريخ الميلاد</label>
+                  <input type="date" value={newDOB} onChange={e => setNewDOB(e.target.value)}
+                    className="input-field" dir="ltr" />
+                </div>
               </div>
+              <div>
+                <label className="field-label">بيانات إضافية</label>
+                <input value={newNotes} onChange={e => setNewNotes(e.target.value)}
+                  className="input-field" placeholder="اختياري..." />
+              </div>
+              <button
+                onClick={createNewCase}
+                disabled={addingNew || !newChildName.trim() || !newSponsorName.trim() || !newFixed || Number(newFixed) <= 0}
+                className="btn btn-primary"
+                style={{ whiteSpace: "nowrap" }}
+              >
+                {addingNew ? "جاري الحفظ..." : "+ إنشاء وإضافة"}
+              </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Search bar */}
+      {rows.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <input
+            value={rowSearch}
+            onChange={e => setRowSearch(e.target.value)}
+            className="input-field"
+            placeholder="🔍 ابحث باسم الطفل أو العائل أو الكفيل..."
+            style={{ fontSize: "0.85rem" }}
+          />
         </div>
       )}
 
@@ -754,26 +792,52 @@ function SettlementTable({
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
             <thead>
               <tr style={{ background: "#F0EDE7" }}>
-                <th style={{ padding: "10px 10px", textAlign: "center", width: 36 }}>
+                {/* Include all */}
+                <th style={{ padding: "8px 10px", textAlign: "center", width: 36 }}>
                   <input
                     type="checkbox"
                     checked={allIncluded}
                     onChange={e => toggleSelectAll(e.target.checked)}
                     style={{ cursor: "pointer", width: 16, height: 16 }}
+                    title="تحديد الكل"
                   />
                 </th>
-                <th style={{ padding: "10px 8px", textAlign: "right", fontWeight: 700, color: "var(--text-2)" }}>الطفل</th>
-                <th style={{ padding: "10px 8px", textAlign: "right", fontWeight: 700, color: "var(--text-2)" }}>الكفيل</th>
-                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>الكفالة</th>
-                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>الزيادة</th>
-                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-1)", background: "#E4DDD3", whiteSpace: "nowrap" }}>الإجمالي</th>
-                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>تحصيل</th>
-                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>استلم</th>
-                <th style={{ padding: "10px 8px", textAlign: "center", width: 64 }}></th>
+                <th style={{ padding: "8px 8px", textAlign: "right", fontWeight: 700, color: "var(--text-2)" }}>الطفل</th>
+                <th style={{ padding: "8px 8px", textAlign: "right", fontWeight: 700, color: "var(--text-2)" }}>الكفيل</th>
+                <th style={{ padding: "8px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>الكفالة</th>
+                <th style={{ padding: "8px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>الزيادة</th>
+                <th style={{ padding: "8px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-1)", background: "#E4DDD3", whiteSpace: "nowrap" }}>الإجمالي</th>
+                {/* Collected — with select-all */}
+                <th style={{ padding: "8px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>
+                  <div>تحصيل</div>
+                  <input
+                    type="checkbox"
+                    checked={allCollected}
+                    onChange={e => setRows(prev => prev.map(r => ({ ...r, collected: e.target.checked })))}
+                    style={{ cursor: "pointer", width: 14, height: 14, marginTop: 4, accentColor: "var(--green)" }}
+                    title="تحديد الكل"
+                  />
+                </th>
+                {/* One column per operator — with select-all */}
+                {operators.map(op => (
+                  <th key={op.id} style={{ padding: "8px 6px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap", minWidth: 60 }}>
+                    <div style={{ fontSize: "0.78rem" }}>{op.name}</div>
+                    <input
+                      type="checkbox"
+                      checked={rows.every(r => r.received_by === op.id)}
+                      onChange={e => setRows(prev => prev.map(r => ({ ...r, received_by: e.target.checked ? op.id : (r.received_by === op.id ? "" : r.received_by) })))}
+                      style={{ cursor: "pointer", width: 14, height: 14, marginTop: 4, accentColor: "var(--green)" }}
+                      title={`تحديد الكل لـ ${op.name}`}
+                    />
+                  </th>
+                ))}
+                <th style={{ padding: "8px 8px", textAlign: "center", width: 64 }}></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, idx) => (
+              {visibleRows.map((row) => {
+                const idx = rows.findIndex(r => r.sponsorship_id === row.sponsorship_id);
+                return (
                 <>
                   <tr
                     key={row.sponsorship_id}
@@ -830,43 +894,27 @@ function SettlementTable({
                       {fmt(row.newFixed + row.newExtras)}
                     </td>
 
-                    {/* Collected */}
+                    {/* Collected — checkbox */}
                     <td style={{ padding: "8px 8px", textAlign: "center" }}>
-                      <button
-                        type="button"
-                        onClick={() => updateRow(idx, { collected: !row.collected })}
-                        style={{
-                          background: "none", border: "none", cursor: "pointer",
-                          color: row.collected ? "var(--green)" : "var(--text-3)",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          margin: "0 auto",
-                        }}
-                      >
-                        {row.collected
-                          ? <CheckCircle size={18} />
-                          : <Circle size={18} />
-                        }
-                      </button>
+                      <input
+                        type="checkbox"
+                        checked={row.collected}
+                        onChange={e => updateRow(idx, { collected: e.target.checked })}
+                        style={{ cursor: "pointer", width: 16, height: 16, accentColor: "var(--green)" }}
+                      />
                     </td>
 
-                    {/* Received by */}
-                    <td style={{ padding: "8px 4px", textAlign: "center" }}>
-                      <select
-                        value={row.received_by}
-                        onChange={e => updateRow(idx, { received_by: e.target.value })}
-                        style={{
-                          border: "1px solid var(--border)", borderRadius: 6,
-                          padding: "4px 6px", fontSize: "0.75rem", background: "var(--surface)",
-                          color: row.received_by ? "var(--text-1)" : "var(--text-3)",
-                          minWidth: 72,
-                        }}
-                      >
-                        <option value="">—</option>
-                        {operators.map(o => (
-                          <option key={o.id} value={o.id}>{o.name}</option>
-                        ))}
-                      </select>
-                    </td>
+                    {/* One checkbox per operator */}
+                    {operators.map(op => (
+                      <td key={op.id} style={{ padding: "8px 6px", textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={row.received_by === op.id}
+                          onChange={() => updateRow(idx, { received_by: row.received_by === op.id ? "" : op.id })}
+                          style={{ cursor: "pointer", width: 16, height: 16, accentColor: "var(--green)" }}
+                        />
+                      </td>
+                    ))}
 
                     {/* Actions */}
                     <td style={{ padding: "8px 6px", textAlign: "center" }}>
@@ -901,7 +949,7 @@ function SettlementTable({
                   {/* Inline edit panel */}
                   {row.editing && (
                     <tr key={`${row.sponsorship_id}-edit`} style={{ background: "var(--green-light)", borderBottom: "1px solid var(--border)" }}>
-                      <td colSpan={9} style={{ padding: "12px 16px" }}>
+                      <td colSpan={7 + operators.length + 1} style={{ padding: "12px 16px" }}>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 12, alignItems: "flex-end" }}>
                           <div>
                             <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, color: "var(--text-2)", marginBottom: 4 }}>
@@ -946,7 +994,8 @@ function SettlementTable({
                     </tr>
                   )}
                 </>
-              ))}
+                );
+              })}
             </tbody>
             {/* Grand totals */}
             <tfoot>

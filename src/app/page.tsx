@@ -306,7 +306,7 @@ export default function Home() {
               value={selectedMonth}
               onChange={e => setSelectedMonth(e.target.value)}
               className="select-field"
-              style={{ paddingLeft: 32, minWidth: 150, height: 40, fontSize: "0.82rem" }}
+              style={{ paddingLeft: 32, minWidth: 150, height: 40, fontSize: "0.82rem", appearance: "none", WebkitAppearance: "none" }}
             >
               {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
