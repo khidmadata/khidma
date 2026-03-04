@@ -861,14 +861,23 @@ function ArchiveTab({ areas }: { areas: Area[] }) {
                         كفالات {fmt(Number(d.fixed_total))} + زيادات {fmt(Number(d.extras_total))} = {fmt(total)} ج
                       </div>
                     </div>
-                    <Link
-                      href={`/report?area=${d.area_id}&month=${selectedMonth}`}
-                      className="btn btn-primary btn-sm"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <FileText size={13} /> عرض / طباعة
-                    </Link>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Link
+                        href={`/settle?area=${d.area_id}&month=${selectedMonth}`}
+                        className="btn btn-sm"
+                        style={{ border: "1.5px solid var(--indigo)", color: "var(--indigo)", background: "rgba(99,102,241,0.08)" }}
+                      >
+                        ✏ تعديل
+                      </Link>
+                      <Link
+                        href={`/report?area=${d.area_id}&month=${selectedMonth}`}
+                        className="btn btn-primary btn-sm"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <FileText size={13} /> عرض / طباعة
+                      </Link>
+                    </div>
                   </div>
                   <ProgressBar value={total} max={monthTotal} color="var(--indigo)" />
                 </div>
