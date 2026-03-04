@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import {
   LayoutDashboard, Check, Trash2,
@@ -1163,7 +1164,16 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
     if (bulkPreview.length === 0 || saving) return;
     setSaving(true);
 
-    // 1. Insert per-case monthly_adjustments (one_time_extra) → reflects in زيادات column
+    // 1. Delete any previous bulk sadaqat adjustments for these cases+month (idempotent re-run)
+    const caseIds = bulkPreview.map(c => c.id);
+    await supabase.from("monthly_adjustments")
+      .delete()
+      .in("case_id", caseIds)
+      .eq("month_year", monthYear)
+      .eq("adjustment_type", "one_time_extra")
+      .is("sponsorship_id", null);
+
+    // 2. Insert per-case monthly_adjustments (one_time_extra) → reflects in زيادات column
     const adjInserts = bulkPreview.map(c => ({
       case_id:         c.id,
       month_year:      monthYear,
@@ -1460,19 +1470,31 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
 // ═══════════════════════════════════════════════════════════════════════════════
 function StepReports({ monthYear, area, onBack }: { monthYear: string; area: Area | null; onBack: () => void }) {
   const [allAreas, setAllAreas] = useState<Area[]>([]);
-  const [loading,  setLoading]  = useState(!area); // skip loading if area is already known
+  const [loading,  setLoading]  = useState(!area);
+  const [saved,    setSaved]    = useState<Set<string>>(new Set());
+  const [saving,   setSaving]   = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (area) return; // manual mode: need all areas
+    if (area) return;
     supabase.from("areas").select("*").eq("is_active", true).then(({ data }) => {
       setAllAreas(data || []);
       setLoading(false);
     });
   }, [area]);
 
+  async function saveReport(a: Area) {
+    setSaving(prev => new Set(prev).add(a.id));
+    await supabase.from("settlement_reports").insert({
+      area_id:    a.id,
+      area_name:  a.name,
+      month_year: monthYear,
+    });
+    setSaved(prev => new Set(prev).add(a.id));
+    setSaving(prev => { const s = new Set(prev); s.delete(a.id); return s; });
+  }
+
   if (loading) return <Loader />;
 
-  // If an area was selected, show only that area; otherwise show all
   const reportAreas: Area[] = area ? [area] : allAreas;
 
   return (
@@ -1483,20 +1505,35 @@ function StepReports({ monthYear, area, onBack }: { monthYear: string; area: Are
       </p>
       <div style={{ display: "grid", gap: 12, marginBottom: 16 }}>
         {reportAreas.map(a => (
-          <button
-            key={a.id}
-            onClick={() => window.open(`/report?area=${a.id}&month=${monthYear}`, "_blank")}
-            className="card"
-            style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "1rem 1.25rem", border: "1.5px solid var(--border)", transition: "border-color 0.15s" }}
-            onMouseEnter={e => (e.currentTarget.style.borderColor = "var(--green)")}
-            onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--border)")}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div key={a.id} className="card" style={{ padding: "1rem 1.25rem", border: "1.5px solid var(--border)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <FileText size={18} style={{ color: "var(--green)" }} />
               <span style={{ fontWeight: 700 }}>كشف {a.name}</span>
             </div>
-            <span style={{ fontSize: "0.8rem", color: "var(--text-3)" }}>فتح التقرير ↗</span>
-          </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => window.open(`/report?area=${a.id}&month=${monthYear}`, "_blank")}
+                className="btn btn-sm"
+                style={{ flex: 1, border: "1.5px solid var(--green)", color: "var(--green)", background: "var(--green-light)" }}
+              >
+                فتح التقرير ↗
+              </button>
+              {saved.has(a.id) ? (
+                <span style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontSize: "0.82rem", color: "var(--green)", fontWeight: 700 }}>
+                  <Check size={14} /> تم الحفظ
+                </span>
+              ) : (
+                <button
+                  onClick={() => saveReport(a)}
+                  disabled={saving.has(a.id)}
+                  className="btn btn-sm"
+                  style={{ flex: 1, border: "1.5px solid var(--indigo)", color: "var(--indigo)", background: "rgba(99,102,241,0.08)" }}
+                >
+                  {saving.has(a.id) ? "..." : "حفظ في الأرشيف ✓"}
+                </button>
+              )}
+            </div>
+          </div>
         ))}
       </div>
       <button onClick={onBack} className="btn btn-secondary" style={{ width: "100%" }}>← السابق</button>
@@ -1509,10 +1546,31 @@ function StepReports({ monthYear, area, onBack }: { monthYear: string; area: Are
 // ═══════════════════════════════════════════════════════════════════════════════
 type PageStep = "area" | "table" | "sadaqat" | "reports";
 
-export default function SettlePage() {
+function SettlePageInner() {
+  const params = useSearchParams();
+  const router = useRouter();
   const [pageStep,     setPageStep]     = useState<PageStep>("area");
   const [selectedArea, setSelectedArea] = useState<Area | null>(null);
   const [monthYear,    setMonthYear]    = useState("");
+
+  // Auto-select from URL params (e.g. when reopening from archive)
+  useEffect(() => {
+    const areaParam  = params.get("area");
+    const monthParam = params.get("month");
+    if (areaParam && monthParam) {
+      supabase.from("areas").select("id, name").eq("id", areaParam).single()
+        .then(({ data }) => {
+          if (data) {
+            setSelectedArea(data as Area);
+            setMonthYear(monthParam);
+            setPageStep("table");
+            // Clean URL params without reload
+            router.replace("/settle");
+          }
+        });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function handleAreaMonthSelect(area: Area | null, month: string) {
     setSelectedArea(area);
@@ -1629,5 +1687,13 @@ export default function SettlePage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function SettlePage() {
+  return (
+    <Suspense fallback={<Loader />}>
+      <SettlePageInner />
+    </Suspense>
   );
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ClipboardList, UserPlus, FileText, Heart } from "lucide-react";
+import { LayoutDashboard, ClipboardList, UserPlus, FileText, Heart, Archive } from "lucide-react";
 
 const NAV = [
   { href: "/",         label: "الرئيسية", Icon: LayoutDashboard },
@@ -10,6 +10,7 @@ const NAV = [
   { href: "/sadaqat",  label: "الصدقات",  Icon: Heart },
   { href: "/register", label: "تسجيل",    Icon: UserPlus },
   { href: "/settle",   label: "تسوية",    Icon: FileText },
+  { href: "/archive",  label: "الأرشيف",  Icon: Archive },
 ];
 
 export function BottomNav() {
