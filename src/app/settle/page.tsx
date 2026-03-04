@@ -1065,6 +1065,7 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
   const [bulkMode,      setBulkMode]      = useState<"none" | "uniform" | "byType">("none");
   const [uniformAmount, setUniformAmount] = useState("");
   const [amountByType,  setAmountByType]  = useState<Record<string, string>>({});
+  const [bulkOperator,  setBulkOperator]  = useState("");
 
   useEffect(() => {
     (async () => {
@@ -1180,12 +1181,14 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
       destination_type:        "kafala_case",
       destination_description: `توزيع جماعي — ${areaLabel} — ${bulkPreview.length} حالة`,
       month_year:              monthYear,
+      approved_by:             bulkOperator || null,
     }).select("*").single();
     if (poolError) { alert("خطأ: " + poolError.message); setSaving(false); return; }
 
     if (poolData) setEntries(prev => [...prev, poolData]);
     setPoolBalance(prev => prev - bulkTotal);
-    setBulkMode("none"); setUniformAmount(""); setAmountByType({});
+    if (bulkOperator) setOpBalances(prev => ({ ...prev, [bulkOperator]: (prev[bulkOperator] || 0) - bulkTotal }));
+    setBulkMode("none"); setUniformAmount(""); setAmountByType({}); setBulkOperator("");
     setSaving(false);
   }
 
@@ -1417,8 +1420,17 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
                   )}
                 </div>
               )}
+              <div style={{ marginBottom: 10 }}>
+                <label className="field-label">يصرف من رصيد</label>
+                <select value={bulkOperator} onChange={e => setBulkOperator(e.target.value)} className="select-field">
+                  <option value="">— اختر المسؤول —</option>
+                  {operators.map(op => (
+                    <option key={op.id} value={op.id}>{op.name} ({fmt(opBalances[op.id] || 0)} ج)</option>
+                  ))}
+                </select>
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => { setBulkMode("none"); setUniformAmount(""); setAmountByType({}); }} className="btn" style={{ flex: 1, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text-2)" }}>
+                <button onClick={() => { setBulkMode("none"); setUniformAmount(""); setAmountByType({}); setBulkOperator(""); }} className="btn" style={{ flex: 1, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text-2)" }}>
                   إلغاء
                 </button>
                 <button
