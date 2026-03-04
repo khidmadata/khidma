@@ -791,44 +791,50 @@ function SettlementTable({
         <div style={{ overflowX: "auto", marginBottom: 16 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
             <thead>
-              {/* Row 1 — main headers */}
               <tr style={{ background: "#F0EDE7" }}>
-                <th rowSpan={2} style={{ padding: "8px 10px", textAlign: "center", width: 36, verticalAlign: "middle" }}>
+                <th style={{ padding: "10px 10px", textAlign: "center", width: 36, verticalAlign: "middle" }}>
                   <input type="checkbox" checked={allIncluded} onChange={e => toggleSelectAll(e.target.checked)}
                     style={{ cursor: "pointer", width: 16, height: 16 }} title="تحديد الكل" />
                 </th>
-                <th rowSpan={2} style={{ padding: "8px 8px", textAlign: "right", fontWeight: 700, color: "var(--text-2)", verticalAlign: "middle" }}>الطفل</th>
-                <th rowSpan={2} style={{ padding: "8px 8px", textAlign: "right", fontWeight: 700, color: "var(--text-2)", verticalAlign: "middle" }}>الكفيل</th>
-                <th rowSpan={2} style={{ padding: "8px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap", verticalAlign: "middle" }}>الكفالة</th>
-                <th rowSpan={2} style={{ padding: "8px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap", verticalAlign: "middle" }}>الزيادة</th>
-                <th rowSpan={2} style={{ padding: "8px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-1)", background: "#E4DDD3", whiteSpace: "nowrap", verticalAlign: "middle" }}>الإجمالي</th>
-                {/* تحصيل spans both rows so the select-all sits inside it */}
-                <th rowSpan={2} style={{ padding: "8px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap", verticalAlign: "middle" }}>
+                <th style={{ padding: "10px 8px", textAlign: "right", fontWeight: 700, color: "var(--text-2)" }}>الطفل</th>
+                <th style={{ padding: "10px 8px", textAlign: "right", fontWeight: 700, color: "var(--text-2)" }}>الكفيل</th>
+                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>الكفالة</th>
+                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>الزيادة</th>
+                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-1)", background: "#E4DDD3", whiteSpace: "nowrap" }}>الإجمالي</th>
+                {/* تحصيل with select-all */}
+                <th style={{ padding: "10px 8px", textAlign: "center", fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" }}>
                   <div>تحصيل</div>
                   <input type="checkbox" checked={allCollected}
                     onChange={e => setRows(prev => prev.map(r => ({ ...r, collected: e.target.checked })))}
                     style={{ cursor: "pointer", width: 14, height: 14, marginTop: 4, accentColor: "var(--green)" }} title="تحديد الكل" />
                 </th>
-                {/* استلم spans all operator columns */}
-                <th colSpan={operators.length} style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700, color: "var(--green)", background: "#E8F5EE", borderBottom: "1px solid #C8E6D4", whiteSpace: "nowrap" }}>
-                  استلم
-                </th>
-                <th rowSpan={2} style={{ padding: "8px 8px", textAlign: "center", width: 64, verticalAlign: "middle" }}></th>
-              </tr>
-              {/* Row 2 — operator sub-columns */}
-              <tr style={{ background: "#F0FAF5" }}>
+                {/* One column per operator — styled as استلم cards */}
                 {operators.map(op => (
-                  <th key={op.id} style={{ padding: "6px 6px", textAlign: "center", fontWeight: 600, color: "var(--green)", background: "#E8F5EE", whiteSpace: "nowrap", minWidth: 60, borderTop: "1px solid #C8E6D4" }}>
-                    <div style={{ fontSize: "0.78rem" }}>{op.name}</div>
-                    <input
-                      type="checkbox"
-                      checked={rows.every(r => r.received_by === op.id)}
-                      onChange={e => setRows(prev => prev.map(r => ({ ...r, received_by: e.target.checked ? op.id : (r.received_by === op.id ? "" : r.received_by) })))}
-                      style={{ cursor: "pointer", width: 14, height: 14, marginTop: 3, accentColor: "var(--green)" }}
-                      title={`تحديد الكل لـ ${op.name}`}
-                    />
+                  <th key={op.id} style={{ padding: "8px 6px", textAlign: "center", background: "#E8F5EE", whiteSpace: "nowrap", minWidth: 68, borderRight: "1px solid #C8E6D4", borderLeft: "1px solid #C8E6D4" }}>
+                    <div style={{
+                      fontSize: "0.6rem", fontWeight: 700, color: "var(--green)", letterSpacing: "0.06em",
+                      textTransform: "uppercase", opacity: 0.7, marginBottom: 3,
+                    }}>
+                      استلم
+                    </div>
+                    <div style={{
+                      display: "inline-block", background: "var(--green)", color: "white",
+                      borderRadius: 20, padding: "2px 10px", fontSize: "0.75rem", fontWeight: 700, marginBottom: 4,
+                    }}>
+                      {op.name}
+                    </div>
+                    <div>
+                      <input
+                        type="checkbox"
+                        checked={rows.every(r => r.received_by === op.id)}
+                        onChange={e => setRows(prev => prev.map(r => ({ ...r, received_by: e.target.checked ? op.id : (r.received_by === op.id ? "" : r.received_by) })))}
+                        style={{ cursor: "pointer", width: 14, height: 14, accentColor: "var(--green)" }}
+                        title={`تحديد الكل لـ ${op.name}`}
+                      />
+                    </div>
                   </th>
                 ))}
+                <th style={{ padding: "10px 8px", textAlign: "center", width: 64 }}></th>
               </tr>
             </thead>
             <tbody>
