@@ -1161,17 +1161,29 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
   async function applyBulkDistribution() {
     if (bulkPreview.length === 0 || saving) return;
     setSaving(true);
-    const inserts = bulkPreview.map(c => ({
-      transaction_type:        "outflow",
-      amount:                  c.distAmount,
-      destination_type:        "kafala_case",
-      destination_case_id:     c.id,
-      destination_description: `${c.child_name}${c.guardian_name ? ` (${c.guardian_name})` : ""} — توزيع جماعي`,
-      month_year:              monthYear,
+
+    // 1. Insert per-case monthly_adjustments (one_time_extra) → reflects in زيادات column
+    const adjInserts = bulkPreview.map(c => ({
+      case_id:         c.id,
+      month_year:      monthYear,
+      adjustment_type: "one_time_extra",
+      amount:          c.distAmount,
     }));
-    const { data, error } = await supabase.from("sadaqat_pool").insert(inserts).select("*");
-    if (error) { alert("خطأ: " + error.message); setSaving(false); return; }
-    setEntries(prev => [...prev, ...(data || [])]);
+    const { error: adjError } = await supabase.from("monthly_adjustments").insert(adjInserts);
+    if (adjError) { alert("خطأ: " + adjError.message); setSaving(false); return; }
+
+    // 2. ONE summary entry in sadaqat_pool → shows as single line in صندوق الصدقات
+    const areaLabel = area ? area.name : "إدخال يدوي";
+    const { data: poolData, error: poolError } = await supabase.from("sadaqat_pool").insert({
+      transaction_type:        "outflow",
+      amount:                  bulkTotal,
+      destination_type:        "kafala_case",
+      destination_description: `توزيع جماعي — ${areaLabel} — ${bulkPreview.length} حالة`,
+      month_year:              monthYear,
+    }).select("*").single();
+    if (poolError) { alert("خطأ: " + poolError.message); setSaving(false); return; }
+
+    if (poolData) setEntries(prev => [...prev, poolData]);
     setPoolBalance(prev => prev - bulkTotal);
     setBulkMode("none"); setUniformAmount(""); setAmountByType({});
     setSaving(false);
