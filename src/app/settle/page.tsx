@@ -318,10 +318,12 @@ function SettlementTable({
       .in("case_id", caseIds);
     const adjs: any[] = adjRes.data || [];
 
-    // Build rows
+    // Build rows — sum ALL one_time_extra for the case (includes bulk sadaqat with sponsorship_id=null)
     const newRows: SettleRow[] = sps.map(sp => {
-      const adj = adjs.find(a => a.sponsorship_id === sp.id);
-      const extras = adj ? Number(adj.amount) : 0;
+      const caseAdjs = adjs.filter(a => a.case_id === sp.case_id);
+      const extras = caseAdjs.reduce((s: number, a: any) => s + Number(a.amount), 0);
+      // Prefer the adj linked to this specific sponsorship for editing; fall back to any
+      const adj = caseAdjs.find(a => a.sponsorship_id === sp.id) || caseAdjs[0] || null;
       return {
         sponsorship_id: sp.id,
         sponsor_id: sp.sponsor_id,
@@ -456,36 +458,27 @@ function SettlementTable({
     const errors: string[] = [];
 
     for (const row of rows) {
-      // Save extras changes
+      // Save extras changes — delete all existing entries for this case+month, then insert fresh
       if (row.newExtras !== row.extras) {
-        if (row.extra_adj_id) {
-          if (row.newExtras > 0) {
-            const { error } = await supabase
-              .from("monthly_adjustments")
-              .update({ amount: row.newExtras })
-              .eq("id", row.extra_adj_id);
-            if (error) errors.push(error.message);
-          } else {
-            // newExtras = 0, delete the adj
-            const { error } = await supabase
-              .from("monthly_adjustments")
-              .delete()
-              .eq("id", row.extra_adj_id);
-            if (error) errors.push(error.message);
-          }
-        } else if (row.newExtras > 0) {
-          // No existing adj, insert new
+        const { error: delErr } = await supabase
+          .from("monthly_adjustments")
+          .delete()
+          .eq("case_id", row.case_id)
+          .eq("month_year", monthYear)
+          .eq("adjustment_type", "one_time_extra");
+        if (delErr) errors.push(delErr.message);
+        else if (row.newExtras > 0) {
           const { error } = await supabase
             .from("monthly_adjustments")
             .insert({
-              sponsorship_id:  row.sponsorship_id,
-              case_id:         row.case_id,
-              sponsor_id:      row.sponsor_id,
-              month_year:      monthYear,
-              adjustment_type: "one_time_extra",
-              amount:          row.newExtras,
+              sponsorship_id:   row.sponsorship_id,
+              case_id:          row.case_id,
+              sponsor_id:       row.sponsor_id,
+              month_year:       monthYear,
+              adjustment_type:  "one_time_extra",
+              amount:           row.newExtras,
               old_fixed_amount: row.fixed,
-              applied:         row.collected,
+              applied:          row.collected,
             });
           if (error) errors.push(error.message);
         }
