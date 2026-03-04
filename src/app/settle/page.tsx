@@ -1036,40 +1036,57 @@ function SettlementTable({
 // ═══════════════════════════════════════════════════════════════════════════════
 // STEP "sadaqat" — SADAQAT
 // ═══════════════════════════════════════════════════════════════════════════════
-function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext: () => void; onBack: () => void }) {
-  const [cases,       setCases]       = useState<any[]>([]);
-  const [operators,   setOperators]   = useState<Operator[]>([]);
-  const [monthInflow, setMonthInflow] = useState(0);
-  const [entries,     setEntries]     = useState<any[]>([]);
-  const [loading,     setLoading]     = useState(true);
-  const [saving,      setSaving]      = useState(false);
+const CASE_TYPE_LABELS: Record<string, string> = {
+  orphan: "كفالة يتيم", vulnerable: "كفالة يتيم",
+  student: "طالب علم", medical: "حالات مرضية", special: "حالات خاصة",
+};
+type AreaCase = { id: string; child_name: string; guardian_name: string | null; case_type: string };
 
-  const [entryType,       setEntryType]       = useState<"kafalah" | "external">("kafalah");
-  const [caseSearch,      setCaseSearch]      = useState("");
-  const [caseFocused,     setCaseFocused]     = useState(false);
-  const [selectedCase,    setSelectedCase]    = useState<any | null>(null);
-  const [recipientName,   setRecipientName]   = useState("");
-  const [recipientDetail, setRecipientDetail] = useState("");
-  const [amount,          setAmount]          = useState("");
-  const [reason,          setReason]          = useState("");
-  const [receivedBy,      setReceivedBy]      = useState("");
+function StepSadaqat({ monthYear, area, onNext, onBack }: {
+  monthYear: string; area: Area | null; onNext: () => void; onBack: () => void;
+}) {
+  const [cases,        setCases]        = useState<any[]>([]);
+  const [operators,    setOperators]    = useState<Operator[]>([]);
+  const [poolBalance,  setPoolBalance]  = useState(0);
+  const [areaCases,    setAreaCases]    = useState<AreaCase[]>([]);
+  const [entries,      setEntries]      = useState<any[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [saving,       setSaving]       = useState(false);
+
+  const [caseSearch,   setCaseSearch]   = useState("");
+  const [caseFocused,  setCaseFocused]  = useState(false);
+  const [selectedCase, setSelectedCase] = useState<any | null>(null);
+  const [amount,       setAmount]       = useState("");
+  const [reason,       setReason]       = useState("");
+  const [receivedBy,   setReceivedBy]   = useState("");
+
+  // Bulk distribution
+  const [bulkMode,      setBulkMode]      = useState<"none" | "uniform" | "byType">("none");
+  const [uniformAmount, setUniformAmount] = useState("");
+  const [amountByType,  setAmountByType]  = useState<Record<string, string>>({});
 
   useEffect(() => {
     (async () => {
-      const [cRes, opRes, inflowRes, outflowRes] = await Promise.all([
+      const [cRes, opRes, poolRes, outflowRes] = await Promise.all([
         supabase.from("cases_by_receiving").select("*"),
         supabase.from("operators").select("id, name").neq("name", "شريف"),
-        supabase.from("sadaqat_pool").select("amount").eq("month_year", monthYear).eq("transaction_type", "inflow"),
+        supabase.from("sadaqat_pool").select("amount, transaction_type"),
         supabase.from("sadaqat_pool").select("*").eq("month_year", monthYear).eq("transaction_type", "outflow"),
       ]);
       setCases((cRes.data as any[]) || []);
       setOperators(opRes.data || []);
-      const inflow = (inflowRes.data || []).reduce((s: number, r: any) => s + Number(r.amount), 0);
-      setMonthInflow(inflow);
+      const allPool = poolRes.data || [];
+      const totalIn  = allPool.filter((r: any) => r.transaction_type === "inflow") .reduce((s: number, r: any) => s + Number(r.amount), 0);
+      const totalOut = allPool.filter((r: any) => r.transaction_type === "outflow").reduce((s: number, r: any) => s + Number(r.amount), 0);
+      setPoolBalance(totalIn - totalOut);
       setEntries(outflowRes.data || []);
+      if (area?.id) {
+        const { data: ac } = await supabase.from("cases").select("id, child_name, guardian_name, case_type").eq("area_id", area.id).eq("status", "active");
+        setAreaCases(ac || []);
+      }
       setLoading(false);
     })();
-  }, [monthYear]);
+  }, [monthYear, area]);
 
   const filteredCases = useMemo(() => {
     const q = caseSearch.trim();
@@ -1080,182 +1097,148 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
   }, [cases, caseSearch]);
 
   const opMap = useMemo(() => Object.fromEntries(operators.map(o => [o.id, o.name])), [operators]);
+  const caseTypes = useMemo(() => [...new Set(areaCases.map(c => c.case_type))], [areaCases]);
+
+  const bulkPreview = useMemo(() => {
+    if (bulkMode === "uniform" && uniformAmount && Number(uniformAmount) > 0) {
+      return areaCases.map(c => ({ ...c, distAmount: Number(uniformAmount) }));
+    }
+    if (bulkMode === "byType") {
+      return areaCases
+        .filter(c => amountByType[c.case_type] && Number(amountByType[c.case_type]) > 0)
+        .map(c => ({ ...c, distAmount: Number(amountByType[c.case_type]) }));
+    }
+    return [] as (AreaCase & { distAmount: number })[];
+  }, [bulkMode, uniformAmount, amountByType, areaCases]);
+
+  const bulkTotal = bulkPreview.reduce((s, c) => s + c.distAmount, 0);
 
   async function addEntry() {
     if (!amount || Number(amount) <= 0) return;
-    if (entryType === "external" && !recipientName.trim()) return;
     setSaving(true);
-
-    const description = entryType === "kafalah"
-      ? (selectedCase
-          ? `${selectedCase.child_name}${selectedCase.guardian_name ? ` (${selectedCase.guardian_name})` : ""} — ${selectedCase.area_name}`
-          : "")
-      : `${recipientName}${recipientDetail ? ` — ${recipientDetail}` : ""}`;
-
+    const description = selectedCase
+      ? `${selectedCase.child_name}${selectedCase.guardian_name ? ` (${selectedCase.guardian_name})` : ""} — ${selectedCase.area_name}`
+      : "";
     const { data, error } = await supabase.from("sadaqat_pool").insert({
       transaction_type:        "outflow",
       amount:                  Number(amount),
-      destination_type:        entryType === "kafalah" ? "kafala_case" : "one_time_case",
+      destination_type:        "kafala_case",
       destination_case_id:     selectedCase?.id || null,
       destination_description: description || reason || null,
       month_year:              monthYear,
       reason:                  reason || null,
       approved_by:             receivedBy || null,
     }).select("*").single();
-
-    if (!error && data) setEntries(prev => [...prev, data]);
+    if (!error && data) { setEntries(prev => [...prev, data]); setPoolBalance(prev => prev - Number(amount)); }
     if (error) alert("خطأ: " + error.message);
-
-    setSelectedCase(null); setCaseSearch(""); setRecipientName(""); setRecipientDetail("");
-    setAmount(""); setReason(""); setReceivedBy("");
+    setSelectedCase(null); setCaseSearch(""); setAmount(""); setReason(""); setReceivedBy("");
     setSaving(false);
   }
 
   async function removeEntry(id: string) {
+    const entry = entries.find((e: any) => e.id === id);
     await supabase.from("sadaqat_pool").delete().eq("id", id);
     setEntries(prev => prev.filter(e => e.id !== id));
+    if (entry) setPoolBalance(prev => prev + Number(entry.amount));
+  }
+
+  async function applyBulkDistribution() {
+    if (bulkPreview.length === 0 || saving) return;
+    setSaving(true);
+    const inserts = bulkPreview.map(c => ({
+      transaction_type:        "outflow",
+      amount:                  c.distAmount,
+      destination_type:        "kafala_case",
+      destination_case_id:     c.id,
+      destination_description: `${c.child_name}${c.guardian_name ? ` (${c.guardian_name})` : ""} — توزيع جماعي`,
+      month_year:              monthYear,
+    }));
+    const { data, error } = await supabase.from("sadaqat_pool").insert(inserts).select("*");
+    if (error) { alert("خطأ: " + error.message); setSaving(false); return; }
+    setEntries(prev => [...prev, ...(data || [])]);
+    setPoolBalance(prev => prev - bulkTotal);
+    setBulkMode("none"); setUniformAmount(""); setAmountByType({});
+    setSaving(false);
   }
 
   if (loading) return <Loader />;
 
-  const totalAllocated   = entries.reduce((s, e) => s + Number(e.amount), 0);
-  const remaining        = monthInflow - totalAllocated;
-  const isFullyAllocated = monthInflow > 0 && totalAllocated >= monthInflow;
+  const totalAllocated = entries.reduce((s, e) => s + Number(e.amount), 0);
 
   return (
     <div>
       <h2 style={{ marginBottom: 4 }}>الصدقات</h2>
       <p style={{ fontSize: "0.82rem", color: "var(--text-3)", marginBottom: 20, margin: "0 0 1.25rem" }}>
-        توزيع وارد الصدقات على المستفيدين — {fmtMonth(monthYear)}
+        توزيع صدقات من الصندوق على المستفيدين — {fmtMonth(monthYear)}
       </p>
 
-      {isFullyAllocated && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "var(--green-light)", border: "1.5px solid var(--green)", borderRadius: "var(--radius)", padding: "0.875rem 1rem", marginBottom: 16 }}>
-          <Check size={20} style={{ color: "var(--green)", flexShrink: 0 }} />
-          <div>
-            <div style={{ fontWeight: 700, color: "var(--green)", fontSize: "0.9rem" }}>تم توزيع كامل وارد الصدقات ✓</div>
-            <div style={{ fontSize: "0.75rem", color: "var(--text-2)", marginTop: 2 }}>وارد: {fmt(monthInflow)} ج — موزَّع بالكامل</div>
-          </div>
-        </div>
-      )}
-
-      {/* Balance summary */}
+      {/* Pool balance summary */}
       <div className="gradient-green" style={{ marginBottom: 16 }}>
         <div style={{ fontSize: "0.68rem", fontWeight: 700, opacity: 0.65, marginBottom: 12, letterSpacing: "0.05em" }}>
-          صدقات {fmtMonth(monthYear)}
+          صندوق الصدقات
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, textAlign: "center" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, textAlign: "center" }}>
           {[
-            { label: "الوارد",   val: monthInflow,            note: "تبرعات مستلمة"        },
-            { label: "المصروف", val: totalAllocated,         note: "تم توزيعه", gold: true },
-            { label: "المتبقي",  val: Math.max(0, remaining), note: "للتوزيع"               },
+            { label: "الرصيد المتاح", val: poolBalance                   },
+            { label: "صرف الشهر",     val: totalAllocated, gold: true    },
           ].map(item => (
             <div key={item.label}>
               <div style={{ fontSize: "0.68rem", opacity: 0.65, marginBottom: 4 }}>{item.label}</div>
               <div style={{ fontSize: "1.3rem", fontWeight: 800, color: (item as any).gold ? "var(--gold-light)" : "inherit" }}>
                 {fmt(item.val)}
               </div>
-              <div style={{ fontSize: "0.63rem", opacity: 0.45, marginTop: 2 }}>{item.note}</div>
             </div>
           ))}
         </div>
-        {monthInflow === 0 && (
-          <div style={{ marginTop: 12, fontSize: "0.75rem", opacity: 0.7, textAlign: "center" }}>
-            لا يوجد وارد صدقات مسجَّل لهذا الشهر
-          </div>
-        )}
       </div>
 
       {/* Add form */}
       <div className="card" style={{ marginBottom: 16 }}>
         <h3 style={{ fontSize: "0.9rem", marginBottom: 12 }}>إضافة صرف</h3>
 
-        {/* Type toggle */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          {([["kafalah", "لكفالة موجودة"], ["external", "حالة خارجية / طارئة"]] as [string, string][]).map(([v, lbl]) => (
-            <button
-              key={v}
-              onClick={() => {
-                setEntryType(v as any);
-                setSelectedCase(null); setCaseSearch(""); setRecipientName(""); setRecipientDetail("");
-              }}
-              className="btn"
-              style={{
-                flex: 1,
-                background: entryType === v ? "var(--green-light)" : "var(--surface)",
-                color:      entryType === v ? "var(--green)"       : "var(--text-3)",
-                border:     entryType === v ? "2px solid var(--green)" : "1.5px solid var(--border)",
-                fontWeight: 600, fontSize: "0.875rem",
-              }}
-            >{lbl}</button>
-          ))}
-        </div>
-
-        {/* Kafalah case search */}
-        {entryType === "kafalah" && (
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ position: "relative" }}>
-              <input
-                value={caseSearch}
-                onChange={e => { setCaseSearch(e.target.value); setSelectedCase(null); }}
-                onFocus={() => setCaseFocused(true)}
-                onBlur={() => setTimeout(() => setCaseFocused(false), 150)}
-                placeholder="ابحث باسم الطفل أو وليّ الأمر أو المنطقة..."
-                className="input-field"
-              />
-              {caseFocused && !selectedCase && filteredCases.length > 0 && (
-                <div className="search-dropdown">
-                  {filteredCases.map(c => (
-                    <button
-                      key={c.id}
-                      onMouseDown={() => {
-                        setSelectedCase(c);
-                        setCaseSearch(`${c.child_name} — ${c.area_name}`);
-                        setCaseFocused(false);
-                      }}
-                      className="search-dropdown-item"
-                      style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, padding: "8px 12px" }}
-                    >
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <span style={{ fontWeight: 700 }}>{c.child_name}</span>
-                        <span style={{ color: "var(--text-3)", fontSize: "0.78rem" }}>— {c.area_name}</span>
-                      </div>
-                      {c.guardian_name && (
-                        <div style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>وليّ: {c.guardian_name}</div>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {selectedCase && (
-              <div style={{ marginTop: 6, background: "var(--cream)", borderRadius: "var(--radius-sm)", padding: "0.5rem 0.875rem", fontSize: "0.875rem", border: "1px solid var(--border-light)" }}>
-                <span style={{ fontWeight: 700 }}>{selectedCase.child_name}</span>
-                <span style={{ color: "var(--text-3)", margin: "0 6px" }}>—</span>
-                <span>{selectedCase.area_name}</span>
-                {selectedCase.guardian_name && (
-                  <span style={{ color: "var(--text-3)", fontSize: "0.78rem" }}> (وليّ: {selectedCase.guardian_name})</span>
-                )}
+        {/* Case search */}
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ position: "relative" }}>
+            <input
+              value={caseSearch}
+              onChange={e => { setCaseSearch(e.target.value); setSelectedCase(null); }}
+              onFocus={() => setCaseFocused(true)}
+              onBlur={() => setTimeout(() => setCaseFocused(false), 150)}
+              placeholder="ابحث باسم الطفل أو وليّ الأمر أو المنطقة..."
+              className="input-field"
+            />
+            {caseFocused && !selectedCase && filteredCases.length > 0 && (
+              <div className="search-dropdown">
+                {filteredCases.map(c => (
+                  <button
+                    key={c.id}
+                    onMouseDown={() => { setSelectedCase(c); setCaseSearch(`${c.child_name} — ${c.area_name}`); setCaseFocused(false); }}
+                    className="search-dropdown-item"
+                    style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, padding: "8px 12px" }}
+                  >
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <span style={{ fontWeight: 700 }}>{c.child_name}</span>
+                      <span style={{ color: "var(--text-3)", fontSize: "0.78rem" }}>— {c.area_name}</span>
+                    </div>
+                    {c.guardian_name && (
+                      <div style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>وليّ: {c.guardian_name}</div>
+                    )}
+                  </button>
+                ))}
               </div>
             )}
           </div>
-        )}
-
-        {/* External case fields */}
-        {entryType === "external" && (
-          <div style={{ display: "grid", gap: 10, marginBottom: 10 }}>
-            <div>
-              <label className="field-label">اسم المستفيد *</label>
-              <input value={recipientName} onChange={e => setRecipientName(e.target.value)}
-                className="input-field" placeholder="الاسم الكامل للمستفيد..." />
+          {selectedCase && (
+            <div style={{ marginTop: 6, background: "var(--cream)", borderRadius: "var(--radius-sm)", padding: "0.5rem 0.875rem", fontSize: "0.875rem", border: "1px solid var(--border-light)" }}>
+              <span style={{ fontWeight: 700 }}>{selectedCase.child_name}</span>
+              <span style={{ color: "var(--text-3)", margin: "0 6px" }}>—</span>
+              <span>{selectedCase.area_name}</span>
+              {selectedCase.guardian_name && (
+                <span style={{ color: "var(--text-3)", fontSize: "0.78rem" }}> (وليّ: {selectedCase.guardian_name})</span>
+              )}
             </div>
-            <div>
-              <label className="field-label">التفاصيل / السبب</label>
-              <input value={recipientDetail} onChange={e => setRecipientDetail(e.target.value)}
-                className="input-field" placeholder="مثل: علاج — شراء أدوية — إيجار — مصاريف..." />
-            </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Amount + received by */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
@@ -1279,15 +1262,15 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
             className="input-field" placeholder="أي ملاحظات إضافية..." />
         </div>
 
-        {Number(amount) > remaining && Number(amount) > 0 && remaining >= 0 && (
+        {Number(amount) > poolBalance && Number(amount) > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.78rem", color: "var(--red)", marginBottom: 8 }}>
-            <AlertCircle size={13} /> المبلغ أكبر من الرصيد المتبقي ({fmt(remaining)} ج)
+            <AlertCircle size={13} /> المبلغ أكبر من الرصيد المتاح ({fmt(poolBalance)} ج)
           </div>
         )}
 
         <button
           onClick={addEntry}
-          disabled={saving || !amount || Number(amount) <= 0 || (entryType === "external" && !recipientName.trim())}
+          disabled={saving || !amount || Number(amount) <= 0}
           className="btn btn-primary"
           style={{ width: "100%", background: "var(--green)" }}
         >
@@ -1309,12 +1292,11 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
                   <div style={{ fontWeight: 700, fontSize: "0.875rem" }}>
                     {e.destination_description || e.reason || "—"}
                   </div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--text-3)", display: "flex", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
-                    <span className={`badge ${e.destination_type === "kafala_case" ? "badge-neutral" : "badge-advance"}`} style={{ fontSize: "0.65rem" }}>
-                      {e.destination_type === "kafala_case" ? "كفالة" : "خارجي"}
-                    </span>
-                    {e.approved_by && <span>استلمه: <strong>{opMap[e.approved_by] || e.approved_by}</strong></span>}
-                  </div>
+                  {e.approved_by && (
+                    <div style={{ fontSize: "0.75rem", color: "var(--text-3)", marginTop: 2 }}>
+                      استلمه: <strong>{opMap[e.approved_by] || e.approved_by}</strong>
+                    </div>
+                  )}
                 </div>
                 <strong style={{ color: "var(--text-1)", whiteSpace: "nowrap" }}>{fmt(e.amount)} ج</strong>
                 <button
@@ -1332,6 +1314,79 @@ function StepSadaqat({ monthYear, onNext, onBack }: { monthYear: string; onNext:
             <span style={{ color: "var(--text-2)" }}>إجمالي المصروفات</span>
             <strong>{fmt(totalAllocated)} ج</strong>
           </div>
+        </div>
+      )}
+
+      {/* Bulk distribution */}
+      {area && areaCases.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: "0.9rem", marginBottom: 12 }}>
+            توزيع جماعي من الصندوق
+            <span style={{ fontWeight: 400, color: "var(--text-3)", marginRight: 8, fontSize: "0.78rem" }}>({areaCases.length} حالة في {area.name})</span>
+          </h3>
+          {bulkMode === "none" ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setBulkMode("uniform")} className="btn btn-secondary" style={{ flex: 1, fontSize: "0.82rem" }}>
+                موحد للكل
+              </button>
+              <button onClick={() => setBulkMode("byType")} className="btn btn-secondary" style={{ flex: 1, fontSize: "0.82rem" }}>
+                حسب نوع الحالة
+              </button>
+            </div>
+          ) : (
+            <div>
+              {bulkMode === "uniform" && (
+                <div style={{ marginBottom: 12 }}>
+                  <label className="field-label">مبلغ لكل حالة (ج)</label>
+                  <input
+                    type="number" value={uniformAmount}
+                    onChange={e => setUniformAmount(e.target.value)}
+                    className="input-field" dir="ltr" placeholder="0"
+                  />
+                  {uniformAmount && Number(uniformAmount) > 0 && (
+                    <div style={{ marginTop: 6, fontSize: "0.78rem", color: "var(--text-2)" }}>
+                      {areaCases.length} حالة × {fmt(Number(uniformAmount))} ج = <strong style={{ color: "var(--green)" }}>{fmt(areaCases.length * Number(uniformAmount))} ج</strong>
+                    </div>
+                  )}
+                </div>
+              )}
+              {bulkMode === "byType" && (
+                <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                  {caseTypes.map(type => (
+                    <div key={type} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ flex: 1, fontSize: "0.85rem" }}>
+                        {CASE_TYPE_LABELS[type] || type}
+                        <span style={{ color: "var(--text-3)", marginRight: 4, fontSize: "0.75rem" }}>({areaCases.filter(c => c.case_type === type).length})</span>
+                      </span>
+                      <input
+                        type="number" value={amountByType[type] || ""}
+                        onChange={e => setAmountByType(prev => ({ ...prev, [type]: e.target.value }))}
+                        className="input-field" dir="ltr" placeholder="0" style={{ width: 110 }}
+                      />
+                    </div>
+                  ))}
+                  {bulkTotal > 0 && (
+                    <div style={{ fontSize: "0.78rem", color: "var(--text-2)", paddingTop: 4, borderTop: "1px solid var(--border-light)" }}>
+                      الإجمالي: <strong style={{ color: "var(--green)" }}>{fmt(bulkTotal)} ج</strong> — {bulkPreview.length} حالة
+                    </div>
+                  )}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => { setBulkMode("none"); setUniformAmount(""); setAmountByType({}); }} className="btn btn-secondary" style={{ flex: 1 }}>
+                  إلغاء
+                </button>
+                <button
+                  onClick={applyBulkDistribution}
+                  disabled={saving || bulkPreview.length === 0 || bulkTotal === 0}
+                  className="btn btn-primary"
+                  style={{ flex: 2, background: "var(--green)" }}
+                >
+                  {saving ? "جاري الحفظ..." : `توزيع ${fmt(bulkTotal)} ج على ${bulkPreview.length} حالة ✓`}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1503,6 +1558,7 @@ export default function SettlePage() {
         {pageStep === "sadaqat" && (
           <StepSadaqat
             monthYear={monthYear}
+            area={selectedArea}
             onNext={() => setPageStep("reports")}
             onBack={() => setPageStep("table")}
           />

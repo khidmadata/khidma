@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   LayoutDashboard, TrendingUp, TrendingDown, FileText,
-  Loader2, X, CheckCircle,
+  Loader2, X, CheckCircle, Pencil,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -13,7 +13,7 @@ const CAUSES = [
   "حالات كفالة",
   "حالات طبية",
   "مساعدة زواج",
-  "سداد ديون",
+  "ديون غارمات",
   "إفطار رمضان",
   "كسوة عيد",
   "بطاطين شتاء",
@@ -79,6 +79,7 @@ export default function SadaqatPage() {
   const [caseMap, setCaseMap]           = useState<Record<string, string>>({});
   const [loading, setLoading]           = useState(true);
   const [reload, setReload]             = useState(0);
+  const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
 
   const monthOptions = useMemo(genMonths, []);
 
@@ -185,7 +186,7 @@ export default function SadaqatPage() {
         {loading ? (
           <div style={{ textAlign: "center", padding: "3rem", color: "var(--text-3)" }}>جاري التحميل...</div>
         ) : tab === "entries" ? (
-          <EntriesView inflows={inflows} outflows={outflows} caseMap={caseMap} selectedMonth={selectedMonth} />
+          <EntriesView inflows={inflows} outflows={outflows} caseMap={caseMap} selectedMonth={selectedMonth} onEditRequest={setEditingEntry} />
         ) : tab === "add" ? (
           <AddForm
             cases={cases}
@@ -200,13 +201,25 @@ export default function SadaqatPage() {
           />
         )}
       </main>
+
+      {editingEntry && (
+        <EditEntryForm
+          entry={editingEntry}
+          onClose={() => setEditingEntry(null)}
+          onSaved={updated => {
+            setEntries(prev => prev.map(e => e.id === updated.id ? { ...e, ...updated } : e));
+            setEditingEntry(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 // ─── Entries View ─────────────────────────────────────────────────────────────
-function EntriesView({ inflows, outflows, caseMap, selectedMonth }: {
+function EntriesView({ inflows, outflows, caseMap, selectedMonth, onEditRequest }: {
   inflows: Entry[]; outflows: Entry[]; caseMap: Record<string, string>; selectedMonth: string;
+  onEditRequest: (e: Entry) => void;
 }) {
   const [view, setView] = useState<"inflows" | "outflows">("inflows");
   const current = view === "inflows" ? inflows : outflows;
@@ -261,8 +274,19 @@ function EntriesView({ inflows, outflows, caseMap, selectedMonth }: {
                       </div>
                     )}
                   </div>
-                  <div style={{ fontWeight: 800, fontSize: "1.05rem", color: view === "inflows" ? "var(--green)" : "var(--red)", flexShrink: 0 }}>
-                    {view === "inflows" ? "+" : "−"}{fmt(Number(e.amount))} ج
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                    <div style={{ fontWeight: 800, fontSize: "1.05rem", color: view === "inflows" ? "var(--green)" : "var(--red)" }}>
+                      {view === "inflows" ? "+" : "−"}{fmt(Number(e.amount))} ج
+                    </div>
+                    <button
+                      onClick={() => onEditRequest(e)}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-3)", padding: 4, display: "flex", alignItems: "center" }}
+                      onMouseEnter={ev => (ev.currentTarget.style.color = "var(--indigo)")}
+                      onMouseLeave={ev => (ev.currentTarget.style.color = "var(--text-3)")}
+                      title="تعديل"
+                    >
+                      <Pencil size={14} />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -621,6 +645,76 @@ function ReportView({ entries, totalIn, totalOut, balance, caseMap, selectedMont
           لا توجد حركات في هذه الفترة
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Edit Entry Form (modal) ───────────────────────────────────────────────────
+function EditEntryForm({ entry, onClose, onSaved }: {
+  entry: Entry;
+  onClose: () => void;
+  onSaved: (updated: Entry) => void;
+}) {
+  const [amount,      setAmount]      = useState(String(entry.amount));
+  const [cause,       setCause]       = useState(entry.cause || "");
+  const [donorName,   setDonorName]   = useState(entry.donor_name || "");
+  const [description, setDescription] = useState(entry.destination_description || "");
+  const [saving,      setSaving]      = useState(false);
+
+  async function save() {
+    if (!amount || Number(amount) <= 0) return;
+    setSaving(true);
+    const { error } = await supabase.from("sadaqat_pool").update({
+      amount:                  Number(amount),
+      destination_type:        cause || null,
+      donor_name:              entry.transaction_type === "inflow" ? (donorName.trim() || null) : null,
+      destination_description: description.trim() || null,
+    }).eq("id", entry.id);
+    if (error) { alert("خطأ: " + error.message); setSaving(false); return; }
+    onSaved({ ...entry, amount: Number(amount), cause, donor_name: donorName, destination_description: description });
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "1rem" }}>
+      <div className="card" style={{ width: "min(90vw, 420px)", padding: "1.25rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ margin: 0, fontSize: "1rem" }}>تعديل القيد</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-3)" }}>
+            <X size={18} />
+          </button>
+        </div>
+        <div style={{ display: "grid", gap: 12 }}>
+          <div>
+            <label className="field-label">المبلغ (ج) *</label>
+            <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="input-field" dir="ltr" />
+          </div>
+          <div>
+            <label className="field-label">الوجهة / السبب</label>
+            <select value={cause} onChange={e => setCause(e.target.value)} className="select-field">
+              <option value="">اختر...</option>
+              {CAUSES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          {entry.transaction_type === "inflow" && (
+            <div>
+              <label className="field-label">اسم المتبرع</label>
+              <input value={donorName} onChange={e => setDonorName(e.target.value)} className="input-field" />
+            </div>
+          )}
+          {entry.transaction_type === "outflow" && (
+            <div>
+              <label className="field-label">وصف الصرف</label>
+              <input value={description} onChange={e => setDescription(e.target.value)} className="input-field" />
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <button onClick={onClose} className="btn btn-secondary" style={{ flex: 1 }}>إلغاء</button>
+            <button onClick={save} disabled={saving || !amount || Number(amount) <= 0} className="btn btn-primary" style={{ flex: 2 }}>
+              {saving ? "جاري الحفظ..." : "حفظ التعديل"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
