@@ -232,7 +232,11 @@ export default function SadaqatPage() {
         {loading ? (
           <div style={{ textAlign: "center", padding: "3rem", color: "var(--text-3)" }}>جاري التحميل...</div>
         ) : tab === "entries" ? (
-          <EntriesView inflows={inflows} outflows={outflows} caseMap={caseMap} opMap={opMap} selectedMonth={selectedMonth} onEditRequest={setEditingEntry} />
+          <EntriesView
+            inflows={inflows} outflows={outflows} caseMap={caseMap} opMap={opMap}
+            selectedMonth={selectedMonth} onEditRequest={setEditingEntry}
+            onDeleteAll={ids => setEntries(prev => prev.filter(e => !ids.includes(e.id)))}
+          />
         ) : tab === "add" ? (
           <>
             <AddForm
@@ -280,12 +284,14 @@ export default function SadaqatPage() {
 }
 
 // ─── Entries View ─────────────────────────────────────────────────────────────
-function EntriesView({ inflows, outflows, caseMap, opMap, selectedMonth, onEditRequest }: {
+function EntriesView({ inflows, outflows, caseMap, opMap, selectedMonth, onEditRequest, onDeleteAll }: {
   inflows: Entry[]; outflows: Entry[]; caseMap: Record<string, string>;
   opMap: Record<string, string>; selectedMonth: string;
   onEditRequest: (e: Entry) => void;
+  onDeleteAll: (ids: string[]) => void;
 }) {
   const [view, setView] = useState<"inflows" | "outflows">("inflows");
+  const [deleting, setDeleting] = useState(false);
   const current = view === "inflows" ? inflows : outflows;
 
   const grouped = useMemo(() => {
@@ -298,9 +304,21 @@ function EntriesView({ inflows, outflows, caseMap, opMap, selectedMonth, onEditR
     return Object.entries(g).sort(([a], [b]) => b.localeCompare(a));
   }, [current]);
 
+  async function handleDeleteAll() {
+    if (current.length === 0) return;
+    const label = view === "inflows" ? "الوارد" : "الصادر";
+    if (!confirm(`حذف جميع سجلات ${label} (${current.length} سجل)؟ لا يمكن التراجع.`)) return;
+    setDeleting(true);
+    const ids = current.map(e => e.id);
+    const { error } = await supabase.from("sadaqat_pool").delete().in("id", ids);
+    setDeleting(false);
+    if (error) { alert("حدث خطأ أثناء الحذف"); return; }
+    onDeleteAll(ids);
+  }
+
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
         {([ ["inflows", `⬇️ الوارد (${inflows.length})`], ["outflows", `⬆️ الصادر (${outflows.length})`] ] as [string,string][]).map(([id, label]) => (
           <button key={id} onClick={() => setView(id as any)} className="btn" style={{
             flex: 1,
@@ -312,6 +330,21 @@ function EntriesView({ inflows, outflows, caseMap, opMap, selectedMonth, onEditR
             {label}
           </button>
         ))}
+        {current.length > 0 && (
+          <button
+            onClick={handleDeleteAll}
+            disabled={deleting}
+            title="حذف الكل"
+            style={{
+              background: "none", border: "1.5px solid var(--red)", borderRadius: "var(--radius-sm)",
+              color: "var(--red)", padding: "6px 10px", cursor: "pointer",
+              fontSize: "0.72rem", fontWeight: 700, flexShrink: 0,
+              opacity: deleting ? 0.5 : 1,
+            }}
+          >
+            {deleting ? "..." : "حذف الكل"}
+          </button>
+        )}
       </div>
 
       <div style={{ display: "grid", gap: 6 }}>
