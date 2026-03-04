@@ -1477,13 +1477,14 @@ function StepReports({ monthYear, area, onBack }: { monthYear: string; area: Are
 
   async function saveReport(a: Area) {
     setSaving(prev => new Set(prev).add(a.id));
-    await supabase.from("settlement_reports").insert({
+    const { error } = await supabase.from("settlement_reports").insert({
       area_id:    a.id,
       area_name:  a.name,
       month_year: monthYear,
     });
-    setSaved(prev => new Set(prev).add(a.id));
     setSaving(prev => { const s = new Set(prev); s.delete(a.id); return s; });
+    if (error) { alert("خطأ في الحفظ: " + error.message); return; }
+    setSaved(prev => new Set(prev).add(a.id));
   }
 
   if (loading) return <Loader />;
