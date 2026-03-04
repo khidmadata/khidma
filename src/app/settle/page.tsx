@@ -1048,6 +1048,7 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
   const [cases,        setCases]        = useState<any[]>([]);
   const [operators,    setOperators]    = useState<Operator[]>([]);
   const [poolBalance,  setPoolBalance]  = useState(0);
+  const [opBalances,   setOpBalances]   = useState<Record<string, number>>({});
   const [areaCases,    setAreaCases]    = useState<AreaCase[]>([]);
   const [entries,      setEntries]      = useState<any[]>([]);
   const [loading,      setLoading]      = useState(true);
@@ -1070,15 +1071,23 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
       const [cRes, opRes, poolRes, outflowRes] = await Promise.all([
         supabase.from("cases_by_receiving").select("*"),
         supabase.from("operators").select("id, name").neq("name", "شريف"),
-        supabase.from("sadaqat_pool").select("amount, transaction_type"),
+        supabase.from("sadaqat_pool").select("amount, transaction_type, approved_by"),
         supabase.from("sadaqat_pool").select("*").eq("month_year", monthYear).eq("transaction_type", "outflow"),
       ]);
+      const ops = opRes.data || [];
       setCases((cRes.data as any[]) || []);
-      setOperators(opRes.data || []);
+      setOperators(ops);
       const allPool = poolRes.data || [];
       const totalIn  = allPool.filter((r: any) => r.transaction_type === "inflow") .reduce((s: number, r: any) => s + Number(r.amount), 0);
       const totalOut = allPool.filter((r: any) => r.transaction_type === "outflow").reduce((s: number, r: any) => s + Number(r.amount), 0);
       setPoolBalance(totalIn - totalOut);
+      const bals: Record<string, number> = {};
+      ops.forEach((op: Operator) => {
+        const opIn  = allPool.filter((r: any) => r.transaction_type === "inflow"  && r.approved_by === op.id).reduce((s: number, r: any) => s + Number(r.amount), 0);
+        const opOut = allPool.filter((r: any) => r.transaction_type === "outflow" && r.approved_by === op.id).reduce((s: number, r: any) => s + Number(r.amount), 0);
+        bals[op.id] = opIn - opOut;
+      });
+      setOpBalances(bals);
       setEntries(outflowRes.data || []);
       if (area?.id) {
         const { data: ac } = await supabase.from("cases").select("id, child_name, guardian_name, case_type").eq("area_id", area.id).eq("status", "active");
@@ -1129,7 +1138,11 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
       reason:                  reason || null,
       approved_by:             receivedBy || null,
     }).select("*").single();
-    if (!error && data) { setEntries(prev => [...prev, data]); setPoolBalance(prev => prev - Number(amount)); }
+    if (!error && data) {
+      setEntries(prev => [...prev, data]);
+      setPoolBalance(prev => prev - Number(amount));
+      if (receivedBy) setOpBalances(prev => ({ ...prev, [receivedBy]: (prev[receivedBy] || 0) - Number(amount) }));
+    }
     if (error) alert("خطأ: " + error.message);
     setSelectedCase(null); setCaseSearch(""); setAmount(""); setReason(""); setReceivedBy("");
     setSaving(false);
@@ -1139,7 +1152,10 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
     const entry = entries.find((e: any) => e.id === id);
     await supabase.from("sadaqat_pool").delete().eq("id", id);
     setEntries(prev => prev.filter(e => e.id !== id));
-    if (entry) setPoolBalance(prev => prev + Number(entry.amount));
+    if (entry) {
+      setPoolBalance(prev => prev + Number(entry.amount));
+      if (entry.approved_by) setOpBalances(prev => ({ ...prev, [entry.approved_by]: (prev[entry.approved_by] || 0) + Number(entry.amount) }));
+    }
   }
 
   async function applyBulkDistribution() {
@@ -1190,6 +1206,17 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
             </div>
           ))}
         </div>
+        {/* Per-operator balances — small */}
+        {operators.length > 0 && (
+          <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "center", flexWrap: "wrap", borderTop: "1px solid rgba(255,255,255,0.2)", paddingTop: 10 }}>
+            {operators.map(op => (
+              <div key={op.id} style={{ fontSize: "0.72rem", opacity: 0.9, display: "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.15)", borderRadius: 20, padding: "2px 10px" }}>
+                <span>{op.name}</span>
+                <strong>{fmt(opBalances[op.id] || 0)} ج</strong>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Add form */}

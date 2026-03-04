@@ -95,6 +95,17 @@ export default function SadaqatPage() {
   const monthOptions = useMemo(genMonths, []);
   const opMap = useMemo(() => Object.fromEntries(operators.map(o => [o.id, o.name])), [operators]);
 
+  // Per-operator balance: inflows they received − outflows they disbursed = what they hold
+  const opBalances = useMemo(() => {
+    const bal: Record<string, number> = {};
+    operators.forEach(op => {
+      const received  = entries.filter(e => e.transaction_type === "inflow"  && e.approved_by === op.id).reduce((s, e) => s + Number(e.amount), 0);
+      const disbursed = entries.filter(e => e.transaction_type === "outflow" && e.approved_by === op.id).reduce((s, e) => s + Number(e.amount), 0);
+      bal[op.id] = received - disbursed;
+    });
+    return bal;
+  }, [entries, operators]);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -198,6 +209,25 @@ export default function SadaqatPage() {
             <div style={{ fontWeight: 800, fontSize: "1rem", color: balance >= 0 ? "var(--green)" : "var(--red)" }}>{fmt(balance)} ج</div>
           </div>
         </div>
+
+        {/* Per-operator balances — small, always visible */}
+        {!loading && operators.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+            {operators.map(op => (
+              <div key={op.id} style={{
+                background: "var(--surface)", border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)", padding: "4px 12px",
+                fontSize: "0.72rem", color: "var(--text-2)",
+                display: "flex", alignItems: "center", gap: 6,
+              }}>
+                <span style={{ color: "var(--text-3)" }}>{op.name}</span>
+                <strong style={{ color: (opBalances[op.id] || 0) >= 0 ? "var(--green)" : "var(--red)" }}>
+                  {fmt(opBalances[op.id] || 0)} ج
+                </strong>
+              </div>
+            ))}
+          </div>
+        )}
 
         {loading ? (
           <div style={{ textAlign: "center", padding: "3rem", color: "var(--text-3)" }}>جاري التحميل...</div>
