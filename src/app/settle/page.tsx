@@ -1477,6 +1477,32 @@ function StepReports({ monthYear, area, onBack }: { monthYear: string; area: Are
 
   async function saveReport(a: Area) {
     setSaving(prev => new Set(prev).add(a.id));
+
+    // Calculate totals from live DB data for this area + month
+    const { data: cases } = await supabase.from("cases").select("id").eq("area_id", a.id).eq("status", "active");
+    const caseIds = (cases || []).map((c: any) => c.id);
+
+    const [spsRes, adjsRes] = await Promise.all([
+      supabase.from("sponsorships").select("fixed_amount").in("case_id", caseIds).eq("status", "active"),
+      supabase.from("monthly_adjustments").select("amount").in("case_id", caseIds).eq("month_year", monthYear).eq("adjustment_type", "one_time_extra"),
+    ]);
+    const fixedTotal  = (spsRes.data  || []).reduce((s: number, r: any) => s + Number(r.fixed_amount), 0);
+    const extrasTotal = (adjsRes.data || []).reduce((s: number, r: any) => s + Number(r.amount), 0);
+
+    // Write to disbursements (delete+insert to avoid duplicates)
+    await supabase.from("disbursements").delete().eq("area_id", a.id).eq("month_year", monthYear);
+    const { error: disbErr } = await supabase.from("disbursements").insert({
+      area_id:      a.id,
+      month_year:   monthYear,
+      fixed_total:  fixedTotal,
+      extras_total: extrasTotal,
+      total_amount: fixedTotal + extrasTotal,
+      status:       "draft",
+    });
+    if (disbErr) { setSaving(prev => { const s = new Set(prev); s.delete(a.id); return s; }); alert("خطأ في الحفظ: " + disbErr.message); return; }
+
+    // Also save to settlement_reports (delete+insert to avoid duplicates)
+    await supabase.from("settlement_reports").delete().eq("area_id", a.id).eq("month_year", monthYear);
     const { error } = await supabase.from("settlement_reports").insert({
       area_id:    a.id,
       area_name:  a.name,
