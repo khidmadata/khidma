@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { LayoutDashboard, UserPlus, Heart, CheckCircle, Loader2 } from "lucide-react";
+import { LayoutDashboard, UserPlus, Heart, CheckCircle, Loader2, CalendarCheck, Search } from "lucide-react";
 import Link from "next/link";
 
 type Area     = { id: string; name: string };
@@ -29,13 +29,15 @@ export default function RegisterPage() {
   }, []);
 
   const TABS = [
-    { id: "sponsor" as const, label: "كفيل جديد",  Icon: UserPlus, desc: "تسجيل كفيل" },
-    { id: "case"    as const, label: "كفالة جديدة", Icon: Heart,    desc: "ربط حالة"   },
+    { id: "sponsor"  as const, label: "كفيل جديد",   Icon: UserPlus,      desc: "تسجيل كفيل"  },
+    { id: "case"     as const, label: "كفالة جديدة",  Icon: Heart,         desc: "ربط حالة"    },
+    { id: "advance"  as const, label: "دفع مسبق",     Icon: CalendarCheck, desc: "تسجيل مسبق"  },
   ];
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
       <header className="app-header">
+
         <Link href="/" className="btn btn-ghost btn-sm" style={{ gap: 5 }}>
           <LayoutDashboard size={16} />
           <span style={{ fontSize: "0.78rem" }}>الرئيسية</span>
@@ -65,6 +67,7 @@ export default function RegisterPage() {
 
         {tab === "sponsor" && <NewSponsorForm operators={operators} sponsors={sponsors} onSaved={s => setSponsors(prev => [...prev, s])} />}
         {tab === "case"    && <NewCaseForm    areas={areas} sponsors={sponsors} />}
+        {tab === "advance" && <AdvancePaymentForm sponsors={sponsors} />}
       </main>
     </div>
   );
@@ -316,3 +319,139 @@ function NewCaseForm({ areas, sponsors }: { areas: Area[]; sponsors: Sponsor[] }
   );
 }
 
+
+// ─── Advance Payment Form ───────────────────────────────────────────────────
+const PT_LABELS: Record<string, string> = {
+  annual: "سنوي", semi_annual: "نصف سنوي", quarterly: "ربع سنوي", compensation: "تعويض",
+};
+
+function AdvancePaymentForm({ sponsors }: { sponsors: Sponsor[] }) {
+  const [spSearch,    setSpSearch]    = useState("");
+  const [spDrop,      setSpDrop]      = useState(false);
+  const [spId,        setSpId]        = useState("");
+  const [caseId,      setCaseId]      = useState("");
+  const [cases,       setCases]       = useState<{ id: string; child_name: string }[]>([]);
+  const [type,        setType]        = useState("annual");
+  const [from,        setFrom]        = useState("");
+  const [until,       setUntil]       = useState("");
+  const [amtPerMonth, setAmtPerMonth] = useState("");
+  const [totalPaid,   setTotalPaid]   = useState("");
+  const [status,      setStatus]      = useState("active");
+  const [notes,       setNotes]       = useState("");
+  const [saving,      setSaving]      = useState(false);
+  const [saved,       setSaved]       = useState(false);
+
+  const filtSp = sponsors.filter(s => s.name.includes(spSearch)).slice(0, 12);
+
+  async function loadCases(sId: string) {
+    const { data } = await supabase
+      .from("sponsorships")
+      .select("case_id, cases(id, child_name)")
+      .eq("sponsor_id", sId)
+      .eq("status", "active");
+    setCases((data || []).map((r: any) => ({ id: r.case_id, child_name: r.cases?.child_name || "" })));
+  }
+
+  async function save() {
+    if (!spId || !caseId || !from || !until) return;
+    setSaving(true);
+    const { error } = await supabase.from("advance_payments").insert({
+      sponsor_id: spId, case_id: caseId, payment_type: type,
+      paid_from: from, paid_until: until,
+      amount_per_month: amtPerMonth ? Number(amtPerMonth) : null,
+      total_paid: totalPaid ? Number(totalPaid) : null,
+      status, notes: notes || null,
+    });
+    if (error) { alert("خطأ: " + error.message); setSaving(false); return; }
+    setSaving(false);
+    setSaved(true);
+  }
+
+  function reset() {
+    setSpSearch(""); setSpId(""); setCaseId(""); setCases([]);
+    setType("annual"); setFrom(""); setUntil("");
+    setAmtPerMonth(""); setTotalPaid(""); setStatus("active"); setNotes("");
+    setSaved(false);
+  }
+
+  if (saved) return <SuccessMsg msg="تم تسجيل الدفع المسبق" onAgain={reset} />;
+
+  return (
+    <div className="card">
+      <h3 style={{ marginBottom: 20 }}>تسجيل دفع مسبق</h3>
+      <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ position: "relative" }}>
+          <label className="field-label">الكفيل *</label>
+          <input
+            value={spSearch}
+            onChange={e => { setSpSearch(e.target.value); setSpId(""); setCaseId(""); setCases([]); setSpDrop(true); }}
+            onFocus={() => setSpDrop(true)}
+            onBlur={() => setTimeout(() => setSpDrop(false), 150)}
+            placeholder="ابحث عن الكفيل..."
+            className="input-field"
+          />
+          {spDrop && spSearch && filtSp.length > 0 && (
+            <div className="search-dropdown">
+              {filtSp.map(s => (
+                <button key={s.id} onClick={() => { setSpId(s.id); setSpSearch(s.name); setSpDrop(false); loadCases(s.id); }}
+                  style={{ width: "100%", padding: "10px 14px", border: "none", borderBottom: "1px solid var(--border-light)", background: "var(--surface)", cursor: "pointer", textAlign: "right", fontSize: "0.875rem" }}>
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {spId && (
+          <div>
+            <label className="field-label">الحالة *</label>
+            <select value={caseId} onChange={e => setCaseId(e.target.value)} className="select-field">
+              <option value="">اختر الحالة...</option>
+              {cases.map(c => <option key={c.id} value={c.id}>{c.child_name}</option>)}
+            </select>
+          </div>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div>
+            <label className="field-label">نوع الدفع</label>
+            <select value={type} onChange={e => setType(e.target.value)} className="select-field">
+              {Object.entries(PT_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="field-label">الحالة</label>
+            <select value={status} onChange={e => setStatus(e.target.value)} className="select-field">
+              <option value="active">دفع فعلاً ✓</option>
+              <option value="pending">ينوي الدفع</option>
+            </select>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div>
+            <label className="field-label">من تاريخ *</label>
+            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="input-field" />
+          </div>
+          <div>
+            <label className="field-label">حتى تاريخ *</label>
+            <input type="date" value={until} onChange={e => setUntil(e.target.value)} className="input-field" />
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div>
+            <label className="field-label">مبلغ/شهر (ج)</label>
+            <input type="number" value={amtPerMonth} onChange={e => setAmtPerMonth(e.target.value)} placeholder="0" className="input-field" />
+          </div>
+          <div>
+            <label className="field-label">إجمالي المدفوع (ج)</label>
+            <input type="number" value={totalPaid} onChange={e => setTotalPaid(e.target.value)} placeholder="0" className="input-field" />
+          </div>
+        </div>
+        <Field label="ملاحظات" value={notes} onChange={setNotes} placeholder="اختياري..." />
+        <button onClick={save} disabled={saving || !spId || !caseId || !from || !until} className="btn btn-primary btn-lg">
+          {saving
+            ? <><Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> جاري الحفظ...</>
+            : "✓ تسجيل الدفع المسبق"}
+        </button>
+      </div>
+    </div>
+  );
+}

@@ -34,6 +34,7 @@ type SettleRow = {
   collected: boolean;
   received_by: string;
   editing: boolean;
+  advance_paid: boolean;
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -323,12 +324,27 @@ function SettlementTable({
       .in("case_id", caseIds);
     const adjs: any[] = adjRes.data || [];
 
+    // Check advance payments for this month
+    const sponsorIds = [...new Set(sps.map(s => s.sponsor_id))];
+    const firstOfMonth = monthYear + "-01";
+    const advRes = await supabase
+      .from("advance_payments")
+      .select("sponsor_id, paid_from, paid_until")
+      .in("sponsor_id", sponsorIds)
+      .eq("status", "active");
+    const advPaidIds = new Set<string>(
+      (advRes.data || [])
+        .filter((a: any) => a.paid_from <= firstOfMonth && a.paid_until >= firstOfMonth)
+        .map((a: any) => a.sponsor_id)
+    );
+
     // Build rows — sum ALL one_time_extra for the case (includes bulk sadaqat with sponsorship_id=null)
     const newRows: SettleRow[] = sps.map(sp => {
       const caseAdjs = adjs.filter(a => a.case_id === sp.case_id);
       const extras = caseAdjs.reduce((s: number, a: any) => s + Number(a.amount), 0);
       // Prefer the adj linked to this specific sponsorship for editing; fall back to any
       const adj = caseAdjs.find(a => a.sponsorship_id === sp.id) || caseAdjs[0] || null;
+      const isAdvPaid = advPaidIds.has(sp.sponsor_id);
       return {
         sponsorship_id: sp.id,
         sponsor_id: sp.sponsor_id,
@@ -342,9 +358,10 @@ function SettlementTable({
         newExtras: extras,
         extra_adj_id: adj?.id || null,
         included: true,
-        collected: false,
+        collected: isAdvPaid,
         received_by: "",
         editing: false,
+        advance_paid: isAdvPaid,
       };
     }).sort((a, b) => a.child_name.localeCompare(b.child_name, "ar"));
 
@@ -378,6 +395,7 @@ function SettlementTable({
       collected: false,
       received_by: "",
       editing: false,
+      advance_paid: false,
     };
     setRows(prev => [...prev, newRow]);
     setAddSearch("");
@@ -447,7 +465,7 @@ function SettlementTable({
       fixed:          Number(newFixed),
       newFixed:       Number(newFixed),
       extras: 0, newExtras: 0, extra_adj_id: null,
-      included: true, collected: false, received_by: "", editing: false,
+      included: true, collected: false, received_by: "", editing: false, advance_paid: false,
     };
     setRows(prev => [...prev, row]);
 
@@ -941,14 +959,18 @@ function SettlementTable({
                       {fmt(row.newFixed + row.newExtras)}
                     </td>
 
-                    {/* Collected — checkbox */}
+                    {/* Collected — checkbox or advance badge */}
                     <td style={{ padding: "8px 8px", textAlign: "center" }}>
-                      <input
-                        type="checkbox"
-                        checked={row.collected}
-                        onChange={e => updateRow(idx, { collected: e.target.checked })}
-                        style={{ cursor: "pointer", width: 16, height: 16, accentColor: "var(--green)" }}
-                      />
+                      {row.advance_paid ? (
+                        <span style={{ fontSize: "0.6rem", fontWeight: 700, background: "var(--green)", color: "white", padding: "2px 5px", borderRadius: 100, whiteSpace: "nowrap" }}>مسبق</span>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={row.collected}
+                          onChange={e => updateRow(idx, { collected: e.target.checked })}
+                          style={{ cursor: "pointer", width: 16, height: 16, accentColor: "var(--green)" }}
+                        />
+                      )}
                     </td>
 
                     {/* One checkbox per operator — light green tint */}
