@@ -396,7 +396,7 @@ function OverviewTab({ sponsorData, totalObligation, totalCollected, paidCount, 
       {/* Sadaqat card */}
       <div className="gradient-green" style={{ marginBottom: 16 }}>
         <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.08em", opacity: 0.7, marginBottom: 12, textTransform: "uppercase" }}>
-          💰 صندوق الصدقات
+          صندوق الصدقات
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
           {[
