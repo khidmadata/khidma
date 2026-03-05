@@ -52,11 +52,16 @@ function fmtMonth(m: string) {
 
 function genThreeMonths() {
   const now = new Date();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daysLeft = daysInMonth - now.getDate();
+  const includeNext = daysLeft <= 7; // show next month in last 7 days of current month
+
   const results: { value: string; label: string }[] = [];
-  for (let i = 2; i >= 0; i--) {
+  // past 2 months + current month + optionally next month
+  for (let i = 2; i >= (includeNext ? -1 : 0); i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    results.push({ value, label: fmtMonth(value) });
+    results.push({ value, label: fmtMonth(value) + (i === -1 ? " ✦" : "") });
   }
   return results;
 }

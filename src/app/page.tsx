@@ -208,9 +208,9 @@ export default function Home() {
   const monthExtras = monthDisbursements.reduce((s, d) => s + Number(d.extras_total), 0);
   const monthTotal  = monthFixed + monthExtras;
 
-  // For a specific month: use actual historical disbursement as obligation (if data exists)
+  // For a specific month: use actual disbursement total (fixed + extras) as obligation
   const displayObligation = (selectedMonth !== "all" && monthFixed > 0)
-    ? monthFixed
+    ? monthTotal   // كفالات + زيادات = what will actually be disbursed
     : totalObligation;
 
   // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
