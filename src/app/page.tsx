@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import {
   Users, DollarSign, TrendingUp, TrendingDown, Building2,
-  Search, Plus, FileText, ChevronDown, ClipboardList, Archive, Heart
+  Search, Plus, FileText, ChevronDown, ClipboardList, Archive, Heart, Database
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -296,6 +296,7 @@ export default function Home() {
           <div style={{ display: "flex", gap: 6 }}>
             <Link href="/tahseel"  className="btn btn-secondary btn-sm"><ClipboardList size={15} />التحصيل</Link>
             <Link href="/sadaqat"  className="btn btn-secondary btn-sm"><Heart size={15} />الصدقات</Link>
+            <Link href="/cases"    className="btn btn-secondary btn-sm"><Database size={15} />الحالات</Link>
             <Link href="/register" className="btn btn-secondary btn-sm"><Plus size={15} />تسجيل</Link>
             <Link href="/settle"   className="btn btn-secondary btn-sm"><FileText size={15} />تسوية</Link>
           </div>

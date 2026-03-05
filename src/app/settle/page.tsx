@@ -556,6 +556,21 @@ function SettlementTable({
       .filter(o => opTotals[o.id])
       .map(o => ({ opName: o.name, amount: opTotals[o.id] }));
 
+    // Auto-sync disbursements so dashboard reflects edits immediately
+    if (area) {
+      const fixedTotal  = rows.reduce((s, r) => s + r.newFixed,  0);
+      const extrasTotal = rows.reduce((s, r) => s + r.newExtras, 0);
+      await supabase.from("disbursements").delete().eq("area_id", area.id).eq("month_year", monthYear);
+      await supabase.from("disbursements").insert({
+        area_id:      area.id,
+        month_year:   monthYear,
+        fixed_total:  fixedTotal,
+        extras_total: extrasTotal,
+        total_amount: fixedTotal + extrasTotal,
+        status:       "draft",
+      });
+    }
+
     setSaving(false);
     if (errors.length) alert("حدثت بعض الأخطاء:\n" + errors.join("\n"));
     setSummary(summaryList);
