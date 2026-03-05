@@ -406,7 +406,7 @@ function OverviewTab({ sponsorData, totalObligation, totalCollected, paidCount, 
           ].map((item, i) => (
             <div key={i} style={{ textAlign: "center" }}>
               <div style={{ fontSize: "0.68rem", opacity: 0.65, marginBottom: 4 }}>{item.label}</div>
-              <div style={{ fontSize: item.large ? "1.5rem" : "1.1rem", fontWeight: 800 }}>
+              <div style={{ fontSize: "1.5rem", fontWeight: 800 }}>
                 {fmt(item.val)}
               </div>
               <div style={{ fontSize: "0.63rem", opacity: 0.45, marginTop: 2 }}>{item.note}</div>
@@ -417,7 +417,7 @@ function OverviewTab({ sponsorData, totalObligation, totalCollected, paidCount, 
 
       {/* Areas */}
       <div className="card">
-        <h3 style={{ marginBottom: 16, fontSize: "0.9rem" }}>🏘️ التوزيع حسب الموقع</h3>
+        <h3 style={{ marginBottom: 16, fontSize: "0.9rem" }}>التوزيع حسب الموقع</h3>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
           {Object.entries(areaBreakdown).map(([aId, data]: [string, any]) => {
             const cardEl = (

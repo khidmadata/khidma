@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#1a5c36"/>
+  <circle cx="16" cy="16" r="13" fill="#22713f"/>
+  <text
+    x="16" y="22"
+    font-family="Tajawal, 'Arabic Typesetting', Arial, sans-serif"
+    font-size="17"
+    font-weight="900"
+    text-anchor="middle"
+    fill="#ffffff"
+    letter-spacing="-0.5"
+  >خ</text>
+</svg>
