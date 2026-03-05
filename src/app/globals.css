@@ -51,7 +51,7 @@ html {
 }
 
 body {
-  font-family: 'IBM Plex Sans Arabic', 'Segoe UI', Tahoma, sans-serif;
+  font-family: 'Tajawal', 'Segoe UI', Tahoma, sans-serif;
   background: var(--cream);
   color: var(--text-1);
   -webkit-font-smoothing: antialiased;
