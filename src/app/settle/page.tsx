@@ -576,6 +576,33 @@ function SettlementTable({
     setSummary(summaryList);
   }
 
+  async function deleteRow(spId: string, caseId: string) {
+    // Delete this case's extras from DB immediately
+    await supabase.from("monthly_adjustments")
+      .delete()
+      .eq("case_id", caseId)
+      .eq("month_year", monthYear)
+      .eq("adjustment_type", "one_time_extra");
+
+    const remaining = rows.filter(r => r.sponsorship_id !== spId);
+    setRows(remaining);
+
+    // Resync disbursements with updated totals
+    if (area) {
+      const fixedTotal  = remaining.reduce((s, r) => s + r.newFixed,  0);
+      const extrasTotal = remaining.reduce((s, r) => s + r.newExtras, 0);
+      await supabase.from("disbursements").delete().eq("area_id", area.id).eq("month_year", monthYear);
+      await supabase.from("disbursements").insert({
+        area_id:      area.id,
+        month_year:   monthYear,
+        fixed_total:  fixedTotal,
+        extras_total: extrasTotal,
+        total_amount: fixedTotal + extrasTotal,
+        status:       "draft",
+      });
+    }
+  }
+
   if (loading) return <Loader />;
 
   // ── Receipt summary screen (shown after save) ──
@@ -948,7 +975,7 @@ function SettlementTable({
                           {row.editing ? <X size={13} /> : <Pencil size={13} />}
                         </button>
                         <button
-                          onClick={() => setRows(prev => prev.filter((_, i) => i !== idx))}
+                          onClick={() => deleteRow(row.sponsorship_id, row.case_id)}
                           style={{
                             background: "none", border: "none", borderRadius: 6, cursor: "pointer",
                             padding: "4px 8px", color: "var(--text-3)",
