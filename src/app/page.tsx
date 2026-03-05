@@ -122,6 +122,7 @@ export default function Home() {
   const [monthDisbursements, setMonthDisbursements] = useState<DisbursementRow[]>([]);
   const [monthLoading,       setMonthLoading]       = useState(false);
   const [lastSettledFixed,   setLastSettledFixed]   = useState(0);
+  const [monthAdjTotal,      setMonthAdjTotal]      = useState(0);
 
   const monthOptions = useMemo(genMonthOptions, []);
 
@@ -164,11 +165,14 @@ export default function Home() {
         .eq("month_year", selectedMonth).in("status", ["paid", "confirmed"]),
       supabase.from("disbursements").select("area_id, fixed_total, extras_total")
         .eq("month_year", selectedMonth),
-    ]).then(async ([collRes, disbRes]) => {
+      supabase.from("monthly_adjustments").select("amount")
+        .eq("month_year", selectedMonth).eq("adjustment_type", "one_time_extra"),
+    ]).then(async ([collRes, disbRes, adjRes]) => {
       const grouped: Record<string, number> = {};
       (collRes.data || []).forEach(c => { grouped[c.sponsor_id] = (grouped[c.sponsor_id] || 0) + Number(c.amount); });
       setMonthCollections(Object.entries(grouped).map(([sponsor_id, total]) => ({ sponsor_id, total })));
       setMonthDisbursements((disbRes.data || []) as DisbursementRow[]);
+      setMonthAdjTotal((adjRes.data || []).reduce((s: number, r: any) => s + Number(r.amount), 0));
       // For unsettled months, carry forward the last settled month's fixed total
       if (!disbRes.data?.length) {
         const lastRes = await supabase
@@ -236,10 +240,10 @@ export default function Home() {
     ? totalObligation
     : (monthFixed > 0 ? monthFixed : lastSettledFixed);
 
-  // Total baseline: settled → fixed + extras; unsettled → same as fixed (no extras yet)
+  // Total baseline: settled → fixed + all extras (monthly_adjustments, same as report page); unsettled → same as fixed
   const displayTotal = selectedMonth === "all"
     ? totalObligation
-    : (monthTotal > 0 ? monthTotal : displayFixed);
+    : (monthFixed > 0 ? monthFixed + monthAdjTotal : displayFixed);
 
   // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
   const COLLECTION_START = "2026-03";
