@@ -123,6 +123,7 @@ export default function Home() {
   const [monthLoading,       setMonthLoading]       = useState(false);
   const [lastSettledFixed,   setLastSettledFixed]   = useState(0);
   const [monthAdjTotal,      setMonthAdjTotal]      = useState(0);
+  const [allActiveFixed,     setAllActiveFixed]     = useState(0);
 
   const monthOptions = useMemo(genMonthOptions, []);
 
@@ -144,6 +145,8 @@ export default function Home() {
       const validSponsorIds = new Set(activeSponsors.map((s: Sponsor) => s.id));
       setSponsors(activeSponsors);
       setSponsorships((shRes.data || []).filter(sh => validSponsorIds.has(sh.sponsor_id)));
+      // Sum ALL active sponsorships (unfiltered) — matches what /report reads
+      setAllActiveFixed((shRes.data || []).reduce((s: number, sh: any) => s + Number(sh.fixed_amount), 0));
       setAreas(arRes.data || []);
       setOperators(opRes.data || []);
       setSadaqat(saRes.data || []);
@@ -235,15 +238,13 @@ export default function Home() {
     ? monthTotal   // كفالات + زيادات = what will actually be disbursed
     : totalObligation;
 
-  // Fixed-only baseline: settled → actual fixed; unsettled → carry last settled month's fixed
-  const displayFixed = selectedMonth === "all"
-    ? totalObligation
-    : (monthFixed > 0 ? monthFixed : lastSettledFixed);
+  // Fixed-only baseline: current active sponsorships (unfiltered) — same source as /report page
+  const displayFixed = selectedMonth === "all" ? totalObligation : allActiveFixed;
 
-  // Total baseline: settled → fixed + all extras (monthly_adjustments, same as report page); unsettled → same as fixed
+  // Total baseline: settled → current fixed + monthly_adjustments extras; unsettled → fixed only
   const displayTotal = selectedMonth === "all"
     ? totalObligation
-    : (monthFixed > 0 ? monthFixed + monthAdjTotal : displayFixed);
+    : (monthFixed > 0 ? allActiveFixed + monthAdjTotal : allActiveFixed);
 
   // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
   const COLLECTION_START = "2026-03";
