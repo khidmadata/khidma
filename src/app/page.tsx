@@ -238,17 +238,6 @@ export default function Home() {
     ? monthTotal   // كفالات + زيادات = what will actually be disbursed
     : totalObligation;
 
-  // Fixed sum from area breakdown — same source as area cards (settled areas use disbursements, others use current active)
-  const areaFixedSum = Object.values(areaBreakdownForMonth).reduce((s: number, a: any) => s + (a.fixed || 0), 0);
-
-  // Fixed-only baseline: matches exactly what area cards show
-  const displayFixed = selectedMonth === "all" ? totalObligation : areaFixedSum;
-
-  // Total baseline: settled → area fixed + monthly_adjustments; unsettled → area fixed only
-  const displayTotal = selectedMonth === "all"
-    ? totalObligation
-    : (monthFixed > 0 ? areaFixedSum + monthAdjTotal : areaFixedSum);
-
   // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
   const COLLECTION_START = "2026-03";
   const displayCollected = (selectedMonth !== "all" && selectedMonth < COLLECTION_START)
@@ -296,6 +285,17 @@ export default function Home() {
     }
     return bd;
   }, [selectedMonth, monthDisbursements, areaBreakdown]);
+
+  // Fixed sum from area breakdown — same source as area cards (settled areas use disbursements, others use current active)
+  const areaFixedSum = Object.values(areaBreakdownForMonth).reduce((s: number, a: any) => s + (a.fixed || 0), 0);
+
+  // Fixed-only baseline: matches exactly what area cards show
+  const displayFixed = selectedMonth === "all" ? totalObligation : areaFixedSum;
+
+  // Total baseline: settled → area fixed + monthly_adjustments; unsettled → area fixed only
+  const displayTotal = selectedMonth === "all"
+    ? totalObligation
+    : (monthFixed > 0 ? areaFixedSum + monthAdjTotal : areaFixedSum);
 
   const paidCount = sponsorData.filter(s => s.paid >= s.obligation && s.obligation > 0).length;
   // For historical pre-March months assume all sponsors paid (100% collected)
