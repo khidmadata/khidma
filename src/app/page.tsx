@@ -121,6 +121,7 @@ export default function Home() {
   const [monthCollections,   setMonthCollections]   = useState<MonthCollection[]>([]);
   const [monthDisbursements, setMonthDisbursements] = useState<DisbursementRow[]>([]);
   const [monthLoading,       setMonthLoading]       = useState(false);
+  const [lastSettledFixed,   setLastSettledFixed]   = useState(0);
 
   const monthOptions = useMemo(genMonthOptions, []);
 
@@ -163,11 +164,28 @@ export default function Home() {
         .eq("month_year", selectedMonth).in("status", ["paid", "confirmed"]),
       supabase.from("disbursements").select("area_id, fixed_total, extras_total")
         .eq("month_year", selectedMonth),
-    ]).then(([collRes, disbRes]) => {
+    ]).then(async ([collRes, disbRes]) => {
       const grouped: Record<string, number> = {};
       (collRes.data || []).forEach(c => { grouped[c.sponsor_id] = (grouped[c.sponsor_id] || 0) + Number(c.amount); });
       setMonthCollections(Object.entries(grouped).map(([sponsor_id, total]) => ({ sponsor_id, total })));
       setMonthDisbursements((disbRes.data || []) as DisbursementRow[]);
+      // For unsettled months, carry forward the last settled month's fixed total
+      if (!disbRes.data?.length) {
+        const lastRes = await supabase
+          .from("disbursements")
+          .select("month_year, fixed_total")
+          .lt("month_year", selectedMonth)
+          .order("month_year", { ascending: false })
+          .limit(50);
+        const lastData = (lastRes.data || []) as { month_year: string; fixed_total: number }[];
+        if (lastData.length > 0) {
+          const lastMonth = lastData[0].month_year;
+          const lf = lastData.filter(d => d.month_year === lastMonth).reduce((s, d) => s + Number(d.fixed_total), 0);
+          setLastSettledFixed(lf);
+        }
+      } else {
+        setLastSettledFixed(0);
+      }
       setMonthLoading(false);
     });
   }, [selectedMonth]);
@@ -213,10 +231,20 @@ export default function Home() {
     ? monthTotal   // كفالات + زيادات = what will actually be disbursed
     : totalObligation;
 
+  // Fixed-only baseline: settled → actual fixed; unsettled → carry last settled month's fixed
+  const displayFixed = selectedMonth === "all"
+    ? totalObligation
+    : (monthFixed > 0 ? monthFixed : lastSettledFixed);
+
+  // Total baseline: settled → fixed + extras; unsettled → same as fixed (no extras yet)
+  const displayTotal = selectedMonth === "all"
+    ? totalObligation
+    : (monthTotal > 0 ? monthTotal : displayFixed);
+
   // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
   const COLLECTION_START = "2026-03";
   const displayCollected = (selectedMonth !== "all" && selectedMonth < COLLECTION_START)
-    ? displayObligation   // 100% — what was sent that month
+    ? displayTotal   // 100% — what was sent that month
     : totalCollected;
 
   const filteredSadaqat = selectedMonth === "all" ? sadaqat : sadaqat.filter(s => s.month_year === selectedMonth);
@@ -334,7 +362,7 @@ export default function Home() {
 
       {/* ── Content ── */}
       <main style={{ maxWidth: 1060, margin: "0 auto", padding: "1.5rem 1rem" }}>
-        {tab === "overview"  && <OverviewTab  sponsorData={sponsorData} totalObligation={displayObligation} totalCollected={displayCollected} paidCount={effectivePaidCount} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} selectedMonth={selectedMonth} />}
+        {tab === "overview"  && <OverviewTab  sponsorData={sponsorData} displayFixed={displayFixed} displayTotal={displayTotal} totalCollected={displayCollected} paidCount={effectivePaidCount} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} selectedMonth={selectedMonth} />}
         {tab === "sadaqat"   && <SadaqatTab   sadaqat={sadaqat} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} selectedMonth={selectedMonth} />}
         {tab === "locations" && <LocationsTab areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} totalObligation={displayObligation} selectedMonth={selectedMonth} />}
         {tab === "archive"   && <ArchiveTab   areas={areas} />}
@@ -350,7 +378,7 @@ export default function Home() {
 // ═══════════════════════════════════════════════════════════════════════
 // OVERVIEW TAB
 // ═══════════════════════════════════════════════════════════════════════
-function OverviewTab({ sponsorData, totalObligation, totalCollected, paidCount, sadaqatBal, sadaqatIn, sadaqatOut, areaBreakdown, areaMap, selectedMonth }: any) {
+function OverviewTab({ sponsorData, displayFixed, displayTotal, totalCollected, paidCount, sadaqatBal, sadaqatIn, sadaqatOut, areaBreakdown, areaMap, selectedMonth }: any) {
   const totalDisb = Object.values(areaBreakdown).reduce((s: number, a: any) => s + a.total, 0);
   const isMonthly = selectedMonth !== "all";
 
@@ -367,13 +395,13 @@ function OverviewTab({ sponsorData, totalObligation, totalCollected, paidCount, 
 
       {/* Stat grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, marginBottom: 20 }}>
-        <StatCard icon={Users}      label="الكفلاء النشطون"   value={sponsorData.length}          color="var(--indigo)" sub="عدد الكفلاء المسجلين في النظام" />
-        <StatCard icon={DollarSign} label="الالتزام الشهري"   value={fmt(totalObligation) + " ج"} color="var(--text-1)" sub="إجمالي ما يلتزم به الكفلاء من دفع شهرياً" />
+        <StatCard icon={Users}      label="الكفلاء النشطون"                        value={sponsorData.length}          color="var(--indigo)" sub="عدد الكفلاء المسجلين في النظام" />
+        <StatCard icon={DollarSign} label="اجمالي الكفالات لكل المناطق"            value={fmt(displayFixed) + " ج"}   color="var(--text-1)" sub="المبلغ الثابت الشهري المستحق للمستفيدين" />
         {isMonthly
           ? <StatCard icon={TrendingUp}  label="تم تحصيله"      value={fmt(totalCollected) + " ج"} color="var(--green)"  sub="المبلغ المستلم فعلياً حتى الآن هذا الشهر" />
           : <StatCard icon={DollarSign}  label="رصيد الصدقات"   value={fmt(sadaqatBal) + " ج"}     color="var(--green)"  sub="الرصيد التراكمي المتاح للتوزيع من الصدقات" />
         }
-        <StatCard icon={Building2} label="إجمالي التوزيع"   value={fmt(totalDisb) + " ج"}         color="var(--indigo)" sub="مجموع الكفالات المستحقة للمستفيدين بحسب المناطق" />
+        <StatCard icon={Building2} label="اجمالي الكفالات والزيادات لكل المناطق"  value={fmt(displayTotal) + " ج"}   color="var(--indigo)" sub="إجمالي الكفالات مضافاً إليها الزيادات المنصرفة" />
       </div>
 
       {/* Collection progress (month mode) */}
@@ -382,13 +410,13 @@ function OverviewTab({ sponsorData, totalObligation, totalCollected, paidCount, 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>نسبة التحصيل</span>
             <span style={{ fontWeight: 800, color: "var(--green)", fontSize: "1.1rem" }}>
-              {totalObligation > 0 ? Math.round((totalCollected / totalObligation) * 100) : 0}٪
+              {displayTotal > 0 ? Math.round((totalCollected / displayTotal) * 100) : 0}٪
             </span>
           </div>
-          <ProgressBar value={totalCollected} max={totalObligation} />
+          <ProgressBar value={totalCollected} max={displayTotal} />
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: "0.75rem", color: "var(--text-3)" }}>
             <span>تم: {fmt(totalCollected)} ج.م</span>
-            <span>المتبقي: {fmt(Math.max(0, totalObligation - totalCollected))} ج.م</span>
+            <span>المتبقي: {fmt(Math.max(0, displayTotal - totalCollected))} ج.م</span>
           </div>
         </div>
       )}
