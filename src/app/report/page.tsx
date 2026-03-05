@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
-import { Printer, ArrowRight } from "lucide-react";
+import { Printer, ArrowRight, Pencil } from "lucide-react";
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 const fmt = (n: number) => n.toLocaleString("en");
@@ -164,6 +164,9 @@ function ReportContent() {
       }}>
         <Link href="/settle" className="btn btn-ghost btn-sm" style={{ gap: 4 }}>
           <ArrowRight size={16} /> العودة
+        </Link>
+        <Link href={`/settle?area=${areaId}&month=${month}`} className="btn btn-sm" style={{ gap: 4, border: "1.5px solid var(--indigo)", color: "var(--indigo)", background: "rgba(99,102,241,0.08)" }}>
+          <Pencil size={14} /> تعديل
         </Link>
         <div style={{ flex: 1, textAlign: "center" }}>
           <span style={{ fontWeight: 700, color: "var(--text-1)", fontSize: "0.9rem" }}>

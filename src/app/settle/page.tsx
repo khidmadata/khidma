@@ -577,6 +577,9 @@ function SettlementTable({
   }
 
   async function deleteRow(spId: string, caseId: string) {
+    // Permanently cancel the sponsorship so case doesn't reappear
+    await supabase.from("sponsorships").update({ status: "cancelled" }).eq("id", spId);
+
     // Delete this case's extras from DB immediately
     await supabase.from("monthly_adjustments")
       .delete()

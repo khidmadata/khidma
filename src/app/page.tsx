@@ -269,7 +269,6 @@ export default function Home() {
 
   const TABS = [
     { id: "overview",   label: "نظرة عامة",        icon: TrendingUp   },
-    { id: "sponsors",   label: "أرصدة الكفلاء",    icon: Users        },
     { id: "sadaqat",    label: "صندوق الصدقات",     icon: DollarSign   },
     { id: "locations",  label: "التوزيع الشهري",    icon: Building2    },
     { id: "archive",    label: "أرشيف التقارير",    icon: Archive      },
@@ -336,7 +335,6 @@ export default function Home() {
       {/* ── Content ── */}
       <main style={{ maxWidth: 1060, margin: "0 auto", padding: "1.5rem 1rem" }}>
         {tab === "overview"  && <OverviewTab  sponsorData={sponsorData} totalObligation={displayObligation} totalCollected={displayCollected} paidCount={effectivePaidCount} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} selectedMonth={selectedMonth} />}
-        {tab === "sponsors"  && <SponsorsTab  sponsorData={sponsorData} advances={advances} selectedMonth={selectedMonth} />}
         {tab === "sadaqat"   && <SadaqatTab   sadaqat={sadaqat} sadaqatBal={sadaqatBal} sadaqatIn={sadaqatIn} sadaqatOut={sadaqatOut} selectedMonth={selectedMonth} />}
         {tab === "locations" && <LocationsTab areaBreakdown={areaBreakdownForMonth} areaMap={areaMap} totalObligation={displayObligation} selectedMonth={selectedMonth} />}
         {tab === "archive"   && <ArchiveTab   areas={areas} />}
@@ -447,132 +445,6 @@ function OverviewTab({ sponsorData, totalObligation, totalCollected, paidCount, 
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// SPONSORS TAB
-// ═══════════════════════════════════════════════════════════════════════
-function SponsorsTab({ sponsorData, advances, selectedMonth }: any) {
-  const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState("obligation");
-
-  const filtered = useMemo(() => {
-    let list = sponsorData;
-    if (search) list = list.filter((s: any) =>
-      s.name.includes(search) || (s.paidThrough !== "—" && s.paidThrough.includes(search))
-    );
-    return [...list].sort((a: any, b: any) => {
-      if (sortBy === "obligation") return b.obligation - a.obligation;
-      if (sortBy === "name")       return a.name.localeCompare(b.name, "ar");
-      if (sortBy === "cases")      return b.caseCount - a.caseCount;
-      return 0;
-    });
-  }, [sponsorData, search, sortBy]);
-
-  const isMonthly = selectedMonth !== "all";
-  const totalShown = filtered.reduce((s: number, sp: any) => s + sp.obligation, 0);
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-        <h2 style={{ margin: 0 }}>أرصدة الكفلاء</h2>
-        <span style={{ fontSize: "0.8rem", color: "var(--text-3)" }}>{filtered.length} كفيل</span>
-      </div>
-      <p style={{ fontSize: "0.82rem", color: "var(--text-3)", marginBottom: 16, margin: "0 0 1rem" }}>
-        {isMonthly ? `حالة السداد — ${fmtMonth(selectedMonth)}` : "الالتزام الشهري وعدد الحالات"}
-      </p>
-
-      {/* Controls */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: 1, minWidth: 180 }}>
-          <Search size={14} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-3)" }} />
-          <input placeholder="بحث بالاسم..." value={search} onChange={e => setSearch(e.target.value)}
-            className="input-field" style={{ paddingRight: 32, height: 40 }} />
-        </div>
-        <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="select-field" style={{ width: "auto", minWidth: 160, height: 40 }}>
-          <option value="obligation">ترتيب: الالتزام</option>
-          <option value="name">ترتيب: الاسم</option>
-          <option value="cases">ترتيب: عدد الحالات</option>
-        </select>
-      </div>
-
-      {/* Table */}
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto", maxHeight: 520, overflowY: "auto" }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>الكفيل</th>
-                <th>يدفع من خلال</th>
-                <th>المسئول</th>
-                <th style={{ textAlign: "center" }}>الحالات</th>
-                <th style={{ textAlign: "center" }}>الالتزام</th>
-                {isMonthly && <th style={{ textAlign: "center" }}>حالة السداد</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((s: any) => (
-                <tr key={s.id}>
-                  <td style={{ color: "var(--text-3)", fontSize: "0.78rem" }}>{s.legacy_id}</td>
-                  <td style={{ fontWeight: 700, color: "var(--text-1)" }}>{s.name}</td>
-                  <td style={{ fontSize: "0.8rem", color: "var(--text-3)" }}>{s.paidThrough}</td>
-                  <td>
-                    <span style={{
-                      padding: "2px 8px", borderRadius: 100, fontSize: "0.72rem", fontWeight: 600,
-                      background: s.responsible === "يوسف" ? "var(--indigo-light)" : s.responsible === "نشوى" ? "#F3EFF9" : "var(--surface-2)",
-                      color:      s.responsible === "يوسف" ? "var(--indigo)"       : s.responsible === "نشوى" ? "#7B4FAD"   : "var(--text-3)",
-                    }}>{s.responsible}</span>
-                  </td>
-                  <td style={{ textAlign: "center" }}>{s.caseCount}</td>
-                  <td style={{ textAlign: "center", fontWeight: 700, color: "var(--gold)" }}>{fmt(s.obligation)} ج</td>
-                  {isMonthly && (
-                    <td style={{ textAlign: "center" }}>
-                      <StatusBadge paid={s.paid} obligation={s.obligation} />
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ padding: "0.75rem 1rem", background: "var(--surface-2)", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", fontSize: "0.8rem", color: "var(--text-3)" }}>
-          <span>عرض {filtered.length} كفيل</span>
-          <span>إجمالي: <strong style={{ color: "var(--text-1)" }}>{fmt(totalShown)} ج.م</strong></span>
-        </div>
-      </div>
-
-      {/* Advance payments */}
-      {advances.length > 0 && (
-        <div className="card" style={{ marginTop: 16 }}>
-          <h3 style={{ fontSize: "0.9rem", marginBottom: 4 }}>📅 مدفوعات مقدمة</h3>
-          <p style={{ fontSize: "0.78rem", color: "var(--text-3)", marginBottom: 12 }}>كفلاء دفعوا سنوياً أو نصف سنوياً مقدماً</p>
-          <div style={{ overflowX: "auto", maxHeight: 240, overflowY: "auto" }}>
-            <table className="data-table" style={{ fontSize: "0.8rem" }}>
-              <thead>
-                <tr>
-                  <th>الطفل</th><th>الكفيل</th><th>النوع</th><th>مدفوع حتى</th>
-                </tr>
-              </thead>
-              <tbody>
-                {advances.map((a: AdvancePayment) => (
-                  <tr key={a.id}>
-                    <td>{a.cases?.child_name}</td>
-                    <td style={{ fontWeight: 600 }}>{a.sponsors?.name}</td>
-                    <td>
-                      <span className={`badge ${a.payment_type === "annual" ? "badge-paid" : a.payment_type === "semi_annual" ? "badge-advance" : "badge-neutral"}`}>
-                        {a.payment_type === "annual" ? "سنوي" : a.payment_type === "semi_annual" ? "نصف سنوي" : a.payment_type}
-                      </span>
-                    </td>
-                    <td dir="ltr" style={{ color: "var(--text-3)" }}>{a.paid_until?.split("T")[0]}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ═══════════════════════════════════════════════════════════════════════
 // SADAQAT TAB
