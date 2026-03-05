@@ -238,15 +238,16 @@ export default function Home() {
     ? monthTotal   // كفالات + زيادات = what will actually be disbursed
     : totalObligation;
 
-  // Fixed-only baseline: settled → historical disbursements.fixed_total; unsettled → all active sponsorships
-  const displayFixed = selectedMonth === "all"
-    ? totalObligation
-    : (monthFixed > 0 ? monthFixed : allActiveFixed);
+  // Fixed sum from area breakdown — same source as area cards (settled areas use disbursements, others use current active)
+  const areaFixedSum = Object.values(areaBreakdownForMonth).reduce((s: number, a: any) => s + (a.fixed || 0), 0);
 
-  // Total baseline: settled → historical fixed + monthly_adjustments; unsettled → fixed only (no extras yet)
+  // Fixed-only baseline: matches exactly what area cards show
+  const displayFixed = selectedMonth === "all" ? totalObligation : areaFixedSum;
+
+  // Total baseline: settled → area fixed + monthly_adjustments; unsettled → area fixed only
   const displayTotal = selectedMonth === "all"
     ? totalObligation
-    : (monthFixed > 0 ? monthFixed + monthAdjTotal : allActiveFixed);
+    : (monthFixed > 0 ? areaFixedSum + monthAdjTotal : areaFixedSum);
 
   // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
   const COLLECTION_START = "2026-03";
