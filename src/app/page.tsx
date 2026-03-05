@@ -238,13 +238,15 @@ export default function Home() {
     ? monthTotal   // كفالات + زيادات = what will actually be disbursed
     : totalObligation;
 
-  // Fixed-only baseline: current active sponsorships (unfiltered) — same source as /report page
-  const displayFixed = selectedMonth === "all" ? totalObligation : allActiveFixed;
+  // Fixed-only baseline: settled → historical disbursements.fixed_total; unsettled → all active sponsorships
+  const displayFixed = selectedMonth === "all"
+    ? totalObligation
+    : (monthFixed > 0 ? monthFixed : allActiveFixed);
 
-  // Total baseline: settled → current fixed + monthly_adjustments extras; unsettled → fixed only
+  // Total baseline: settled → historical fixed + monthly_adjustments; unsettled → fixed only (no extras yet)
   const displayTotal = selectedMonth === "all"
     ? totalObligation
-    : (monthFixed > 0 ? allActiveFixed + monthAdjTotal : allActiveFixed);
+    : (monthFixed > 0 ? monthFixed + monthAdjTotal : allActiveFixed);
 
   // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
   const COLLECTION_START = "2026-03";
