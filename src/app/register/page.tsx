@@ -10,7 +10,7 @@ type Operator = { id: string; name: string };
 type Sponsor  = { id: string; legacy_id: number; name: string };
 
 export default function RegisterPage() {
-  const [tab,       setTab]       = useState<"sponsor" | "case">("sponsor");
+  const [tab,       setTab]       = useState<"sponsor" | "case" | "advance">("sponsor");
   const [areas,     setAreas]     = useState<Area[]>([]);
   const [operators, setOperators] = useState<Operator[]>([]);
   const [sponsors,  setSponsors]  = useState<Sponsor[]>([]);
