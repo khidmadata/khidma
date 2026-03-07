@@ -93,29 +93,20 @@ function ReportContent() {
         .in("case_id", caseIds)
         .eq("adjustment_type", "one_time_extra");
 
-      // 5. Build rows — group by guardian (العائل) so one guardian with multiple children appears once
-      const grouped = new Map<string, ReportRow>();
+      // 5. Build rows — one row per case (child), sorted by guardian name then child name
+      const result: ReportRow[] = [];
       for (const c of cases) {
-        const key   = c.guardian_name?.trim() || c.child_name?.trim() || "—";
         const fixed  = (sps  || []).filter(s => s.case_id === c.id).reduce((s, r) => s + Number(r.fixed_amount), 0);
         const extras = (adjs || []).filter(a => a.case_id === c.id).reduce((s, r) => s + Number(r.amount), 0);
-        const existing = grouped.get(key);
-        if (existing) {
-          existing.fixed  += fixed;
-          existing.extras += extras;
-          existing.total  += fixed + extras;
-        } else {
-          grouped.set(key, {
-            name:      key,
-            case_type: CASE_TYPE_MAP[c.case_type] || c.case_type || "كفالة يتيم",
-            fixed, extras,
-            total: fixed + extras,
-          });
-        }
+        if (fixed + extras === 0) continue; // skip cases with no amounts
+        result.push({
+          name:      c.guardian_name?.trim() || c.child_name?.trim() || "—",
+          case_type: CASE_TYPE_MAP[c.case_type] || c.case_type || "كفالة يتيم",
+          fixed, extras,
+          total: fixed + extras,
+        });
       }
-      const result = [...grouped.values()]
-        .filter(r => r.total > 0)
-        .sort((a, b) => a.name.localeCompare(b.name, "ar"));
+      result.sort((a, b) => a.name.localeCompare(b.name, "ar"));
 
       setRows(result);
     } catch (e: any) {
