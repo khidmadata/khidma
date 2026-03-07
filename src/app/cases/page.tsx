@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
-import { LayoutDashboard, Search } from "lucide-react";
+import { LayoutDashboard, Search, Pencil, X, Loader2 } from "lucide-react";
 
 const CASE_TYPE_AR: Record<string, string> = {
   orphan:   "كفالة يتيم",
@@ -14,6 +14,8 @@ const CASE_TYPE_AR: Record<string, string> = {
 };
 
 const fmt = (n: number) => n.toLocaleString("en");
+
+type Area = { id: string; name: string };
 
 type CaseRow = {
   sponsorship_id: string;
@@ -33,10 +35,32 @@ type CaseRow = {
 };
 
 export default function CasesPage() {
-  const [rows,      setRows]      = useState<CaseRow[]>([]);
-  const [loading,   setLoading]   = useState(true);
-  const [search,    setSearch]    = useState("");
-  const [areaFilter,setAreaFilter]= useState("all");
+  const [rows,         setRows]         = useState<CaseRow[]>([]);
+  const [areas,        setAreas]        = useState<Area[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [search,       setSearch]       = useState("");
+  const [areaFilter,   setAreaFilter]   = useState("all");
+  const [editingId,    setEditingId]    = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [editingSaving,setEditingSaving]= useState(false);
+  const [editCase,     setEditCase]     = useState<CaseRow | null>(null);
+
+  async function saveAmount(sponsorshipId: string) {
+    const val = Number(editingValue);
+    const orig = rows.find(r => r.sponsorship_id === sponsorshipId)?.fixed_amount;
+    if (isNaN(val) || val < 0) { setEditingId(null); return; }
+    if (val === orig) { setEditingId(null); return; }
+    setEditingSaving(true);
+    const { error } = await supabase.from("sponsorships").update({ fixed_amount: val }).eq("id", sponsorshipId);
+    setEditingSaving(false);
+    if (error) { alert("خطأ: " + error.message); setEditingId(null); return; }
+    setRows(prev => prev.map(r => r.sponsorship_id === sponsorshipId ? { ...r, fixed_amount: val } : r));
+    setEditingId(null);
+  }
+
+  useEffect(() => {
+    supabase.from("areas").select("id, name").then(r => setAreas(r.data || []));
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -195,6 +219,7 @@ export default function CasesPage() {
             <table className="data-table" style={{ minWidth: 800 }}>
               <thead>
                 <tr>
+                  <th style={{ width: 32 }}></th>
                   <th>اسم المستفيد</th>
                   <th>العائل</th>
                   <th>المنطقة</th>
@@ -208,6 +233,15 @@ export default function CasesPage() {
               <tbody>
                 {filtered.map(row => (
                   <tr key={row.sponsorship_id}>
+                    <td style={{ padding: "0 4px" }}>
+                      <button
+                        onClick={() => setEditCase(row)}
+                        title="تعديل"
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-3)", padding: 4, display: "flex", alignItems: "center" }}
+                      >
+                        <Pencil size={13} />
+                      </button>
+                    </td>
                     <td>
                       <div style={{ fontWeight: 700 }}>{row.child_name}</div>
                       <div style={{ fontSize: "0.68rem", color: "var(--text-3)", marginTop: 2, fontFamily: "monospace" }}>
@@ -229,8 +263,33 @@ export default function CasesPage() {
                       {row.paid_through || "مباشر"}
                     </td>
                     <td style={{ fontSize: "0.82rem", color: "var(--text-2)" }}>{row.operator_name || "—"}</td>
-                    <td style={{ textAlign: "center", fontWeight: 800, color: "var(--green)", fontSize: "0.95rem" }}>
-                      {fmt(row.fixed_amount)} ج
+                    <td style={{ textAlign: "center" }}>
+                      {editingId === row.sponsorship_id ? (
+                        <input
+                          type="number"
+                          value={editingValue}
+                          onChange={e => setEditingValue(e.target.value)}
+                          onBlur={() => saveAmount(row.sponsorship_id)}
+                          onKeyDown={e => {
+                            if (e.key === "Enter") saveAmount(row.sponsorship_id);
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                          autoFocus
+                          min="0"
+                          disabled={editingSaving}
+                          dir="ltr"
+                          style={{ width: 90, textAlign: "center", padding: "4px 8px", border: "1.5px solid var(--green)", borderRadius: "var(--radius-sm)", fontSize: "0.9rem", fontWeight: 700 }}
+                        />
+                      ) : (
+                        <button
+                          onClick={() => { setEditingId(row.sponsorship_id); setEditingValue(String(row.fixed_amount)); }}
+                          title="انقر للتعديل"
+                          style={{ background: "none", border: "none", cursor: "pointer", fontWeight: 800, color: row.fixed_amount === 0 ? "var(--text-3)" : "var(--green)", fontSize: "0.95rem", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}
+                        >
+                          {fmt(row.fixed_amount)} ج
+                          <Pencil size={11} style={{ color: "var(--text-3)", opacity: 0.6 }} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -238,7 +297,7 @@ export default function CasesPage() {
               {filtered.length > 0 && (
                 <tfoot>
                   <tr style={{ background: "var(--surface)", fontWeight: 700 }}>
-                    <td colSpan={7} style={{ textAlign: "right", color: "var(--text-2)", fontSize: "0.82rem" }}>
+                    <td colSpan={8} style={{ textAlign: "right", color: "var(--text-2)", fontSize: "0.82rem" }}>
                       الإجمالي ({new Set(filtered.map(r => r.case_id)).size} حالة)
                     </td>
                     <td style={{ textAlign: "center", color: "var(--green)", fontWeight: 900 }}>
@@ -254,6 +313,187 @@ export default function CasesPage() {
           </div>
         )}
       </main>
+
+      {editCase && (
+        <EditCaseModal
+          row={editCase}
+          areas={areas}
+          onClose={() => setEditCase(null)}
+          onSaved={updated => {
+            setRows(prev => prev.map(r => r.case_id === updated.case_id ? { ...r, ...updated } : r));
+            setEditCase(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Edit Case Modal ──────────────────────────────────────────────────────────
+function EditCaseModal({ row, areas, onClose, onSaved }: {
+  row: CaseRow;
+  areas: Area[];
+  onClose: () => void;
+  onSaved: (updated: Partial<CaseRow> & { case_id: string }) => void;
+}) {
+  const [childName,    setChildName]    = useState(row.child_name);
+  const [guardian,     setGuardian]     = useState(row.guardian_name || "");
+  const [areaId,       setAreaId]       = useState(row.area_id);
+  const [caseType,     setCaseType]     = useState(row.case_type);
+  const [needsLevel,   setNeedsLevel]   = useState(row.needs_level || "MEDIUM");
+  const [dob,          setDob]          = useState("");
+  const [isMedical,    setIsMedical]    = useState(false);
+  const [hasStudents,  setHasStudents]  = useState(false);
+  const [schoolYear,   setSchoolYear]   = useState("");
+  const [addInfo,      setAddInfo]      = useState("");
+  const [loadingFull,  setLoadingFull]  = useState(true);
+  const [saving,       setSaving]       = useState(false);
+
+  // Load full case details (fields not in CaseRow)
+  useEffect(() => {
+    supabase
+      .from("cases")
+      .select("date_of_birth, is_medical_case, has_students, school_year, additional_info")
+      .eq("id", row.case_id)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setDob(data.date_of_birth || "");
+          setIsMedical(data.is_medical_case || false);
+          setHasStudents(data.has_students || false);
+          setSchoolYear(data.school_year || "");
+          setAddInfo(data.additional_info || "");
+        }
+        setLoadingFull(false);
+      });
+  }, [row.case_id]);
+
+  async function save() {
+    if (!childName.trim()) return;
+    setSaving(true);
+    const { error } = await supabase.from("cases").update({
+      child_name:      childName.trim(),
+      guardian_name:   guardian.trim() || null,
+      area_id:         areaId,
+      case_type:       caseType,
+      needs_level:     needsLevel,
+      date_of_birth:   dob || null,
+      is_medical_case: isMedical,
+      has_students:    hasStudents,
+      school_year:     schoolYear.trim() || null,
+      additional_info: addInfo.trim() || null,
+    }).eq("id", row.case_id);
+    setSaving(false);
+    if (error) { alert("خطأ: " + error.message); return; }
+    const newAreaName = areas.find(a => a.id === areaId)?.name || row.area_name;
+    onSaved({
+      case_id: row.case_id,
+      child_name:    childName.trim(),
+      guardian_name: guardian.trim() || null,
+      area_id:       areaId,
+      area_name:     newAreaName,
+      case_type:     caseType,
+      needs_level:   needsLevel,
+    });
+  }
+
+  const F = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div>
+      <label className="field-label">{label}</label>
+      {children}
+    </div>
+  );
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "1rem" }}>
+      <div className="card" style={{ width: "min(95vw, 520px)", maxHeight: "90vh", overflowY: "auto", padding: "1.25rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+          <h3 style={{ margin: 0, fontSize: "1rem" }}>تعديل الحالة</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-3)" }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {loadingFull ? (
+          <div style={{ textAlign: "center", padding: "2rem", color: "var(--text-3)" }}>
+            <Loader2 size={20} style={{ animation: "spin 1s linear infinite" }} />
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            <F label="اسم الطفل *">
+              <input value={childName} onChange={e => setChildName(e.target.value)} className="input-field" />
+            </F>
+            <F label="اسم العائل">
+              <input value={guardian} onChange={e => setGuardian(e.target.value)} className="input-field" />
+            </F>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <F label="المنطقة">
+                <select value={areaId} onChange={e => setAreaId(e.target.value)} className="select-field">
+                  {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </F>
+              <F label="نوع الحالة">
+                <select value={caseType} onChange={e => setCaseType(e.target.value)} className="select-field">
+                  <option value="orphan">كفالة يتيم</option>
+                  <option value="student">طالب علم</option>
+                  <option value="medical">حالة مرضية</option>
+                  <option value="special">حالة خاصة</option>
+                  <option value="one_time">مساعدة لمرة</option>
+                </select>
+              </F>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <F label="مستوى الاحتياج">
+                <select value={needsLevel} onChange={e => setNeedsLevel(e.target.value)} className="select-field">
+                  <option value="HIGH">عالي</option>
+                  <option value="MEDIUM">متوسط</option>
+                  <option value="LOW">منخفض</option>
+                </select>
+              </F>
+              <F label="تاريخ الميلاد">
+                <input type="date" value={dob} onChange={e => setDob(e.target.value)} className="input-field" />
+              </F>
+            </div>
+
+            <div style={{ display: "flex", gap: 24, paddingTop: 4 }}>
+              {[
+                { label: "حالة مرضية", val: isMedical, set: setIsMedical },
+                { label: "يوجد طلاب",  val: hasStudents, set: setHasStudents },
+              ].map(({ label, val, set }) => (
+                <label key={label} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.875rem", color: "var(--text-2)", cursor: "pointer" }}>
+                  <input type="checkbox" checked={val} onChange={e => set(e.target.checked)}
+                    style={{ width: 16, height: 16, accentColor: "var(--green)" }} />
+                  {label}
+                </label>
+              ))}
+            </div>
+
+            <F label="السنة الدراسية">
+              <input value={schoolYear} onChange={e => setSchoolYear(e.target.value)} placeholder="مثل: ثالثة إعدادي" className="input-field" />
+            </F>
+
+            <F label="بيانات إضافية / ملاحظات">
+              <textarea value={addInfo} onChange={e => setAddInfo(e.target.value)} className="textarea-field" style={{ minHeight: 72 }} />
+            </F>
+
+            <div style={{ fontSize: "0.72rem", color: "var(--text-3)", borderTop: "1px solid var(--border-light)", paddingTop: 8 }}>
+              ID: <span style={{ fontFamily: "monospace" }}>{row.case_id}</span>
+            </div>
+
+            <button
+              onClick={save}
+              disabled={saving || !childName.trim()}
+              className="btn btn-primary btn-lg"
+            >
+              {saving
+                ? <><Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> جاري الحفظ...</>
+                : "✓ حفظ التعديلات"}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

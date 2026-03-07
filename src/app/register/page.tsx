@@ -227,9 +227,9 @@ function NewCaseForm({ areas, sponsors }: { areas: Area[]; sponsors: Sponsor[] }
       additional_info: additionalInfo || null, status: "active",
     }).select("id").single();
     if (caseErr) { alert("خطأ: " + caseErr.message); setSaving(false); return; }
-    if (sponsorId && fixedAmount && caseData) {
+    if (sponsorId && caseData) {
       const { error: spErr } = await supabase.from("sponsorships").insert({
-        sponsor_id: sponsorId, case_id: caseData.id, fixed_amount: Number(fixedAmount), status: "active",
+        sponsor_id: sponsorId, case_id: caseData.id, fixed_amount: fixedAmount !== "" ? Number(fixedAmount) : 0, status: "active",
       });
       if (spErr) alert("تم حفظ الحالة لكن فشل ربط الكفيل: " + spErr.message);
     }

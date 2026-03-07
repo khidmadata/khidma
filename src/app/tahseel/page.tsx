@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   LayoutDashboard, CheckCircle, Circle, ChevronDown, ChevronUp,
-  CalendarCheck, Plus, Pencil, Trash2, Search, X,
+  CalendarCheck, Plus, Pencil, Trash2, Search, X, Loader2,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -118,6 +118,8 @@ export default function TahseelPage() {
   const [fSaving,      setFSaving]      = useState(false);
 
   const advSectionRef = useRef<HTMLDivElement>(null);
+  const [bulking,      setBulking]      = useState(false);
+  const [bulkDone,     setBulkDone]     = useState(false);
 
   useEffect(() => {
     load(selectedMonth);
@@ -256,6 +258,47 @@ export default function TahseelPage() {
       .eq("sponsor_id", spId)
       .eq("status", "active");
     setFCases((data || []).map((r: any) => ({ id: r.case_id, child_name: r.cases?.child_name || "" })));
+  }
+
+  async function bulkMarkHistorical() {
+    if (!confirm("سيتم تسجيل تحصيل (مدفوع) لجميع الكفلاء لكل شهر من يناير 2024 حتى فبراير 2026.\nالشهور التي سبق تسجيلها لن تُمس.\nهل تريد المتابعة؟")) return;
+    setBulking(true);
+    // Generate months 2024-01 → 2026-02
+    const months: string[] = [];
+    let cur = new Date(2024, 0, 1);
+    const last = new Date(2026, 1, 1);
+    while (cur <= last) {
+      months.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}`);
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+    // Get all active sponsorships grouped by sponsor
+    const { data: sps } = await supabase.from("sponsorships").select("sponsor_id, fixed_amount").eq("status", "active");
+    if (!sps?.length) { setBulking(false); return; }
+    const spTotals: Record<string, number> = {};
+    for (const s of sps) spTotals[s.sponsor_id] = (spTotals[s.sponsor_id] || 0) + Number(s.fixed_amount);
+    // Fetch existing collections for those months to avoid duplicates
+    const { data: existing } = await supabase.from("collections").select("sponsor_id, month_year").in("month_year", months);
+    const existingSet = new Set((existing || []).map((r: any) => `${r.sponsor_id}|${r.month_year}`));
+    // Build only missing rows
+    const toInsert: any[] = [];
+    for (const [sponsor_id, fixed] of Object.entries(spTotals)) {
+      for (const month_year of months) {
+        if (!existingSet.has(`${sponsor_id}|${month_year}`)) {
+          toInsert.push({ sponsor_id, amount: fixed, fixed_portion: fixed, extra_portion: 0, sadaqat_portion: 0, month_year, payment_method: "cash", status: "paid" });
+        }
+      }
+    }
+    if (toInsert.length === 0) { setBulking(false); setBulkDone(true); return; }
+    const CHUNK = 500;
+    let errors = 0;
+    for (let i = 0; i < toInsert.length; i += CHUNK) {
+      const { error } = await supabase.from("collections").insert(toInsert.slice(i, i + CHUNK));
+      if (error) errors++;
+    }
+    setBulking(false);
+    setBulkDone(true);
+    if (errors) alert(`اكتملت مع ${errors} أخطاء`);
+    else alert(`تم! أُضيف ${toInsert.length} سجل تحصيل لشهور يناير 2024 – فبراير 2026`);
   }
 
   function openAdvForm(preSpId?: string, preSpName?: string) {
@@ -771,6 +814,35 @@ export default function TahseelPage() {
             </div>
           </>
         )}
+        {/* ── Historical bulk-settle ─────────────────────────────────────── */}
+        <div style={{ marginTop: 32, borderTop: "1px solid var(--border-light)", paddingTop: 20 }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            إعداد البيانات التاريخية
+          </div>
+          {bulkDone ? (
+            <div style={{ padding: "0.75rem 1rem", background: "var(--green-light)", border: "1.5px solid var(--green)", borderRadius: "var(--radius)", fontSize: "0.85rem", color: "var(--green)", fontWeight: 700 }}>
+              ✓ تم تسجيل التحصيل التاريخي — التتبع يبدأ من مارس 2026
+            </div>
+          ) : (
+            <button
+              onClick={bulkMarkHistorical}
+              disabled={bulking}
+              style={{
+                padding: "0.65rem 1.25rem", border: "1.5px solid var(--border)", borderRadius: "var(--radius)",
+                background: "var(--surface)", color: "var(--text-2)", cursor: "pointer",
+                fontSize: "0.82rem", fontWeight: 700, display: "flex", alignItems: "center", gap: 8,
+                opacity: bulking ? 0.6 : 1,
+              }}
+            >
+              {bulking
+                ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> جاري التسجيل...</>
+                : "⏮ تسجيل جميع التحصيلات حتى فبراير 2026 كمدفوعة"}
+            </button>
+          )}
+          <div style={{ fontSize: "0.7rem", color: "var(--text-3)", marginTop: 6 }}>
+            يضيف سجلات تحصيل (مدفوع) لجميع الكفلاء لكل شهر من يناير 2024 إلى فبراير 2026، ويتجاهل الشهور المسجّلة مسبقاً.
+          </div>
+        </div>
       </main>
     </div>
   );

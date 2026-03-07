@@ -38,7 +38,8 @@ const CASE_TYPE_MAP: Record<string, string> = {
 
 type ReportRow = {
   name: string;
-  case_type: string;
+  case_types: string[];
+  children: string[];
   fixed: number;
   extras: number;
   total: number;
@@ -93,19 +94,31 @@ function ReportContent() {
         .in("case_id", caseIds)
         .eq("adjustment_type", "one_time_extra");
 
-      // 5. Build rows — one row per case (child), sorted by guardian name then child name
-      const result: ReportRow[] = [];
+      // 5. Build rows — one row per guardian (العائل), aggregating all children
+      const guardianMap = new Map<string, ReportRow>();
       for (const c of cases) {
         const fixed  = (sps  || []).filter(s => s.case_id === c.id).reduce((s, r) => s + Number(r.fixed_amount), 0);
         const extras = (adjs || []).filter(a => a.case_id === c.id).reduce((s, r) => s + Number(r.amount), 0);
         if (fixed + extras === 0) continue; // skip cases with no amounts
-        result.push({
-          name:      c.guardian_name?.trim() || c.child_name?.trim() || "—",
-          case_type: CASE_TYPE_MAP[c.case_type] || c.case_type || "كفالة يتيم",
-          fixed, extras,
-          total: fixed + extras,
-        });
+        // Key by guardian name, fall back to child name if no guardian
+        const key  = c.guardian_name?.trim() || c.child_name?.trim() || "—";
+        const type = CASE_TYPE_MAP[c.case_type] || c.case_type || "كفالة يتيم";
+        if (guardianMap.has(key)) {
+          const row = guardianMap.get(key)!;
+          row.fixed  += fixed;
+          row.extras += extras;
+          row.total  += fixed + extras;
+          if (!row.case_types.includes(type)) row.case_types.push(type);
+          row.children.push(c.child_name?.trim() || "—");
+        } else {
+          guardianMap.set(key, {
+            name: key, case_types: [type],
+            children: [c.child_name?.trim() || "—"],
+            fixed, extras, total: fixed + extras,
+          });
+        }
       }
+      const result = [...guardianMap.values()];
       result.sort((a, b) => a.name.localeCompare(b.name, "ar"));
 
       setRows(result);
@@ -164,7 +177,7 @@ function ReportContent() {
             {areaName} — {fmtMonth(month)}
           </span>
           <span style={{ color: "var(--text-3)", fontSize: "0.75rem", marginRight: 8 }}>
-            ({rows.length} حالة)
+            ({rows.length} عائلة)
           </span>
         </div>
         <button onClick={() => window.print()} className="btn btn-primary btn-sm">
@@ -206,8 +219,15 @@ function ReportContent() {
             <tbody>
               {rows.map((r, i) => (
                 <tr key={i} style={{ background: i % 2 === 0 ? "white" : "var(--cream)" }}>
-                  <td style={{ fontWeight: 700, color: "var(--text-1)", padding: "9px 14px" }}>{r.name}</td>
-                  <td style={{ color: "var(--text-2)", padding: "9px 14px", fontSize: "0.8rem" }}>{r.case_type}</td>
+                  <td style={{ fontWeight: 700, color: "var(--text-1)", padding: "9px 14px" }}>
+                    {r.name}
+                    {r.children.length > 1 && (
+                      <div style={{ fontSize: "0.68rem", color: "var(--text-3)", fontWeight: 400, marginTop: 2 }}>
+                        {r.children.join(" · ")}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ color: "var(--text-2)", padding: "9px 14px", fontSize: "0.8rem" }}>{r.case_types.join("، ")}</td>
                   <td style={{ textAlign: "center", padding: "9px 14px", color: "var(--text-2)" }}>{r.fixed > 0 ? fmt(r.fixed) : ""}</td>
                   <td style={{ textAlign: "center", padding: "9px 14px", color: r.extras > 0 ? "var(--amber)" : "var(--text-3)" }}>
                     {fmt(r.extras)}
