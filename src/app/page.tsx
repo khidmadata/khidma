@@ -234,12 +234,6 @@ export default function Home() {
   // For a specific month: use actual disbursement total (fixed + extras) as obligation
   const displayObligation = monthFixed > 0 ? monthTotal : totalObligation;
 
-  // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
-  const COLLECTION_START = "2026-03";
-  const displayCollected = selectedMonth < COLLECTION_START
-    ? displayTotal   // 100% — what was sent that month
-    : totalCollected;
-
   const filteredSadaqat = sadaqat.filter(s => s.month_year === selectedMonth);
   const sadaqatIn  = filteredSadaqat.filter(s => s.transaction_type === "inflow").reduce((s, e)  => s + Number(e.amount), 0);
   const sadaqatOut = filteredSadaqat.filter(s => s.transaction_type === "outflow").reduce((s, e) => s + Number(e.amount), 0);
@@ -295,6 +289,12 @@ export default function Home() {
 
   // Total baseline: settled → area fixed + monthly_adjustments; unsettled → area fixed only
   const displayTotal = monthFixed > 0 ? areaFixedSum + monthAdjTotal : areaFixedSum;
+
+  // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
+  const COLLECTION_START = "2026-03";
+  const displayCollected = selectedMonth < COLLECTION_START
+    ? displayTotal   // 100% — what was sent that month
+    : totalCollected;
 
   const paidCount = sponsorData.filter(s => s.paid >= s.obligation && s.obligation > 0).length;
   // For historical pre-March months assume all sponsors paid (100% collected)
