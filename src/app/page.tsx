@@ -125,6 +125,7 @@ export default function Home() {
   const [lastSettledFixed,   setLastSettledFixed]   = useState(0);
   const [monthAdjTotal,      setMonthAdjTotal]      = useState(0);
   const [allActiveFixed,     setAllActiveFixed]     = useState(0);
+  const [allSponsorships,    setAllSponsorships]    = useState<Sponsorship[]>([]);
 
   const monthOptions = useMemo(genMonthOptions, []);
 
@@ -146,6 +147,7 @@ export default function Home() {
       const validSponsorIds = new Set(activeSponsors.map((s: Sponsor) => s.id));
       setSponsors(activeSponsors);
       setSponsorships((shRes.data || []).filter(sh => validSponsorIds.has(sh.sponsor_id)));
+      setAllSponsorships(shRes.data || []);
       // Sum ALL active sponsorships (unfiltered) — matches what /report reads
       setAllActiveFixed((shRes.data || []).reduce((s: number, sh: any) => s + Number(sh.fixed_amount), 0));
       setAreas(arRes.data || []);
@@ -247,7 +249,8 @@ export default function Home() {
   // Area breakdown from current sponsorships (always-current baseline)
   const areaBreakdown = useMemo(() => {
     const bd: Record<string, { caseIds: Set<string>; cases: number; total: number }> = {};
-    sponsorships.forEach(sh => {
+    // Count cases from ALL sponsorships (including صدقات) for accurate case count
+    allSponsorships.forEach(sh => {
       const aId = sh.cases?.area_id;
       if (!aId) return;
       if (!bd[aId]) bd[aId] = { caseIds: new Set(), cases: 0, total: 0 };
@@ -255,10 +258,15 @@ export default function Home() {
         bd[aId].caseIds.add(sh.case_id);
         bd[aId].cases++;
       }
+    });
+    // Sum totals from non-صدقات sponsorships only (financial)
+    sponsorships.forEach(sh => {
+      const aId = sh.cases?.area_id;
+      if (!aId || !bd[aId]) return;
       bd[aId].total += Number(sh.fixed_amount);
     });
     return bd;
-  }, [sponsorships]);
+  }, [sponsorships, allSponsorships]);
 
   // Area breakdown for selected month — all areas always shown; settled areas use disbursement data
   const areaBreakdownForMonth = useMemo(() => {
