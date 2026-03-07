@@ -11,6 +11,7 @@ const CASE_TYPE_AR: Record<string, string> = {
   medical:  "حالة مرضية",
   special:  "حالة خاصة",
   one_time: "مساعدة لمرة",
+  other:    "أخرى",
 };
 
 const fmt = (n: number) => n.toLocaleString("en");
@@ -342,8 +343,6 @@ function EditCaseModal({ row, areas, onClose, onSaved }: {
   const [caseType,     setCaseType]     = useState(row.case_type);
   const [needsLevel,   setNeedsLevel]   = useState(row.needs_level || "MEDIUM");
   const [dob,          setDob]          = useState("");
-  const [isMedical,    setIsMedical]    = useState(false);
-  const [hasStudents,  setHasStudents]  = useState(false);
   const [schoolYear,   setSchoolYear]   = useState("");
   const [addInfo,      setAddInfo]      = useState("");
   const [loadingFull,  setLoadingFull]  = useState(true);
@@ -353,14 +352,12 @@ function EditCaseModal({ row, areas, onClose, onSaved }: {
   useEffect(() => {
     supabase
       .from("cases")
-      .select("date_of_birth, is_medical_case, has_students, school_year, additional_info")
+      .select("date_of_birth, school_year, additional_info")
       .eq("id", row.case_id)
       .single()
       .then(({ data }) => {
         if (data) {
           setDob(data.date_of_birth || "");
-          setIsMedical(data.is_medical_case || false);
-          setHasStudents(data.has_students || false);
           setSchoolYear(data.school_year || "");
           setAddInfo(data.additional_info || "");
         }
@@ -378,8 +375,6 @@ function EditCaseModal({ row, areas, onClose, onSaved }: {
       case_type:       caseType,
       needs_level:     needsLevel,
       date_of_birth:   dob || null,
-      is_medical_case: isMedical,
-      has_students:    hasStudents,
       school_year:     schoolYear.trim() || null,
       additional_info: addInfo.trim() || null,
     }).eq("id", row.case_id);
@@ -440,6 +435,7 @@ function EditCaseModal({ row, areas, onClose, onSaved }: {
                   <option value="medical">حالة مرضية</option>
                   <option value="special">حالة خاصة</option>
                   <option value="one_time">مساعدة لمرة</option>
+                  <option value="other">أخرى</option>
                 </select>
               </F>
             </div>
@@ -455,19 +451,6 @@ function EditCaseModal({ row, areas, onClose, onSaved }: {
               <F label="تاريخ الميلاد">
                 <input type="date" value={dob} onChange={e => setDob(e.target.value)} className="input-field" />
               </F>
-            </div>
-
-            <div style={{ display: "flex", gap: 24, paddingTop: 4 }}>
-              {[
-                { label: "حالة مرضية", val: isMedical, set: setIsMedical },
-                { label: "يوجد طلاب",  val: hasStudents, set: setHasStudents },
-              ].map(({ label, val, set }) => (
-                <label key={label} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.875rem", color: "var(--text-2)", cursor: "pointer" }}>
-                  <input type="checkbox" checked={val} onChange={e => set(e.target.checked)}
-                    style={{ width: 16, height: 16, accentColor: "var(--green)" }} />
-                  {label}
-                </label>
-              ))}
             </div>
 
             <F label="السنة الدراسية">
