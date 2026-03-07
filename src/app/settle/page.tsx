@@ -1157,8 +1157,11 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
       setOpBalances(bals);
       setEntries(outflowRes.data || []);
       if (area?.id) {
+        // Only cases that have at least one active sponsorship
+        const { data: spData } = await supabase.from("sponsorships").select("case_id").eq("status", "active");
+        const sponsoredIds = new Set((spData || []).map((s: any) => s.case_id));
         const { data: ac } = await supabase.from("cases").select("id, child_name, guardian_name, case_type").eq("area_id", area.id).eq("status", "active");
-        setAreaCases(ac || []);
+        setAreaCases((ac || []).filter((c: any) => sponsoredIds.has(c.id)));
       }
       setLoading(false);
     })();

@@ -42,16 +42,17 @@ const MONTHS_AR: Record<string, string> = {
 };
 
 function fmtMonth(m: string) {
-  if (m === "all") return "كل الوقت";
   const [y, mo] = m.split("-");
   return `${MONTHS_AR[mo] || mo} ${y}`;
 }
 
 function genMonthOptions() {
-  const opts: { value: string; label: string }[] = [{ value: "all", label: "كل الوقت ★" }];
+  const opts: { value: string; label: string }[] = [];
   const now = new Date();
-  // Start from 1 month ahead so the working month is always available
-  for (let i = -1; i < 24; i++) {
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const inLastWeek = now.getDate() >= lastDay - 6;
+  const startI = inLastWeek ? -1 : 0; // include next month only in last 7 days
+  for (let i = startI; i < 24; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     opts.push({ value, label: fmtMonth(value) });
@@ -157,11 +158,6 @@ export default function Home() {
 
   // Month-specific collections + disbursements
   useEffect(() => {
-    if (selectedMonth === "all") {
-      setMonthCollections([]);
-      setMonthDisbursements([]);
-      return;
-    }
     setMonthLoading(true);
     Promise.all([
       supabase.from("collections").select("sponsor_id, amount")
@@ -234,32 +230,31 @@ export default function Home() {
   const monthTotal  = monthFixed + monthExtras;
 
   // For a specific month: use actual disbursement total (fixed + extras) as obligation
-  const displayObligation = (selectedMonth !== "all" && monthFixed > 0)
-    ? monthTotal   // كفالات + زيادات = what will actually be disbursed
-    : totalObligation;
+  const displayObligation = monthFixed > 0 ? monthTotal : totalObligation;
 
   // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
   const COLLECTION_START = "2026-03";
-  const displayCollected = (selectedMonth !== "all" && selectedMonth < COLLECTION_START)
+  const displayCollected = selectedMonth < COLLECTION_START
     ? displayTotal   // 100% — what was sent that month
     : totalCollected;
 
-  const filteredSadaqat = selectedMonth === "all" ? sadaqat : sadaqat.filter(s => s.month_year === selectedMonth);
+  const filteredSadaqat = sadaqat.filter(s => s.month_year === selectedMonth);
   const sadaqatIn  = filteredSadaqat.filter(s => s.transaction_type === "inflow").reduce((s, e)  => s + Number(e.amount), 0);
   const sadaqatOut = filteredSadaqat.filter(s => s.transaction_type === "outflow").reduce((s, e) => s + Number(e.amount), 0);
-  const sadaqatBal = selectedMonth === "all"
-    ? sadaqat.filter(s => s.transaction_type === "inflow").reduce((s, e) => s + Number(e.amount), 0)
-    - sadaqat.filter(s => s.transaction_type === "outflow").reduce((s, e) => s + Number(e.amount), 0)
-    : sadaqatIn - sadaqatOut;
+  const sadaqatBal = sadaqat.filter(s => s.transaction_type === "inflow").reduce((s, e) => s + Number(e.amount), 0)
+    - sadaqat.filter(s => s.transaction_type === "outflow").reduce((s, e) => s + Number(e.amount), 0);
 
   // Area breakdown from current sponsorships (always-current baseline)
   const areaBreakdown = useMemo(() => {
-    const bd: Record<string, { cases: number; total: number }> = {};
+    const bd: Record<string, { caseIds: Set<string>; cases: number; total: number }> = {};
     sponsorships.forEach(sh => {
       const aId = sh.cases?.area_id;
       if (!aId) return;
-      if (!bd[aId]) bd[aId] = { cases: 0, total: 0 };
-      bd[aId].cases++;
+      if (!bd[aId]) bd[aId] = { caseIds: new Set(), cases: 0, total: 0 };
+      if (!bd[aId].caseIds.has(sh.case_id)) {
+        bd[aId].caseIds.add(sh.case_id);
+        bd[aId].cases++;
+      }
       bd[aId].total += Number(sh.fixed_amount);
     });
     return bd;
@@ -273,16 +268,14 @@ export default function Home() {
       bd[aId] = { cases: data.cases, total: data.total, fixed: data.total, extras: 0 };
     });
     // Overlay with historical disbursement data for the selected month
-    if (selectedMonth !== "all") {
-      monthDisbursements.forEach(d => {
-        bd[d.area_id] = {
-          cases: areaBreakdown[d.area_id]?.cases || 0,
-          fixed: Number(d.fixed_total),
-          extras: Number(d.extras_total),
-          total: Number(d.fixed_total) + Number(d.extras_total),
-        };
-      });
-    }
+    monthDisbursements.forEach(d => {
+      bd[d.area_id] = {
+        cases: areaBreakdown[d.area_id]?.cases || 0,
+        fixed: Number(d.fixed_total),
+        extras: Number(d.extras_total),
+        total: Number(d.fixed_total) + Number(d.extras_total),
+      };
+    });
     return bd;
   }, [selectedMonth, monthDisbursements, areaBreakdown]);
 
@@ -290,16 +283,14 @@ export default function Home() {
   const areaFixedSum = Object.values(areaBreakdownForMonth).reduce((s: number, a: any) => s + (a.fixed || 0), 0);
 
   // Fixed-only baseline: matches exactly what area cards show
-  const displayFixed = selectedMonth === "all" ? totalObligation : areaFixedSum;
+  const displayFixed = areaFixedSum;
 
   // Total baseline: settled → area fixed + monthly_adjustments; unsettled → area fixed only
-  const displayTotal = selectedMonth === "all"
-    ? totalObligation
-    : (monthFixed > 0 ? areaFixedSum + monthAdjTotal : areaFixedSum);
+  const displayTotal = monthFixed > 0 ? areaFixedSum + monthAdjTotal : areaFixedSum;
 
   const paidCount = sponsorData.filter(s => s.paid >= s.obligation && s.obligation > 0).length;
   // For historical pre-March months assume all sponsors paid (100% collected)
-  const effectivePaidCount = (selectedMonth !== "all" && selectedMonth < COLLECTION_START && monthFixed > 0)
+  const effectivePaidCount = (selectedMonth < COLLECTION_START && monthFixed > 0)
     ? sponsorData.length
     : paidCount;
 
@@ -388,32 +379,26 @@ export default function Home() {
 // ═══════════════════════════════════════════════════════════════════════
 function OverviewTab({ sponsorData, displayFixed, displayTotal, totalCollected, paidCount, sadaqatBal, sadaqatIn, sadaqatOut, areaBreakdown, areaMap, selectedMonth }: any) {
   const totalDisb = Object.values(areaBreakdown).reduce((s: number, a: any) => s + a.total, 0);
-  const isMonthly = selectedMonth !== "all";
 
   return (
     <div>
       <div style={{ marginBottom: 24, display: "flex", alignItems: "baseline", gap: 12 }}>
-        <h2 style={{ margin: 0 }}>{isMonthly ? `تقرير ${fmtMonth(selectedMonth)}` : "نظرة إجمالية"}</h2>
-        {isMonthly && (
-          <span style={{ fontSize: "0.8rem", color: "var(--text-3)" }}>
-            {paidCount} من {sponsorData.length} كفيل دفعوا
-          </span>
-        )}
+        <h2 style={{ margin: 0 }}>{`تقرير ${fmtMonth(selectedMonth)}`}</h2>
+        <span style={{ fontSize: "0.8rem", color: "var(--text-3)" }}>
+          {paidCount} من {sponsorData.length} كفيل دفعوا
+        </span>
       </div>
 
       {/* Stat grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, marginBottom: 20 }}>
         <StatCard icon={Users}      label="الكفلاء النشطون"                        value={sponsorData.length}          color="var(--indigo)" sub="عدد الكفلاء المسجلين في النظام" />
         <StatCard icon={DollarSign} label="اجمالي الكفالات لكل المناطق"            value={fmt(displayFixed) + " ج"}   color="var(--text-1)" sub="المبلغ الثابت الشهري المستحق للمستفيدين" />
-        {isMonthly
-          ? <StatCard icon={TrendingUp}  label="تم تحصيله"      value={fmt(totalCollected) + " ج"} color="var(--green)"  sub="المبلغ المستلم فعلياً حتى الآن هذا الشهر" />
-          : <StatCard icon={DollarSign}  label="رصيد الصدقات"   value={fmt(sadaqatBal) + " ج"}     color="var(--green)"  sub="الرصيد التراكمي المتاح للتوزيع من الصدقات" />
-        }
-        <StatCard icon={Building2} label="اجمالي الكفالات والزيادات لكل المناطق"  value={fmt(displayTotal) + " ج"}   color="var(--indigo)" sub="إجمالي الكفالات مضافاً إليها الزيادات المنصرفة" />
+        <StatCard icon={TrendingUp} label="تم تحصيله"                              value={fmt(totalCollected) + " ج"} color="var(--green)"  sub="المبلغ المستلم فعلياً حتى الآن هذا الشهر" />
+        <StatCard icon={Building2}  label="اجمالي الكفالات والزيادات لكل المناطق" value={fmt(displayTotal) + " ج"}   color="var(--indigo)" sub="إجمالي الكفالات مضافاً إليها الزيادات المنصرفة" />
       </div>
 
-      {/* Collection progress (month mode) */}
-      {isMonthly && totalCollected > 0 && (
+      {/* Collection progress */}
+      {totalCollected > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>نسبة التحصيل</span>
@@ -455,26 +440,21 @@ function OverviewTab({ sponsorData, displayFixed, displayTotal, totalCollected, 
       <div className="card">
         <h3 style={{ marginBottom: 16, fontSize: "0.9rem" }}>التوزيع حسب الموقع</h3>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
-          {Object.entries(areaBreakdown).map(([aId, data]: [string, any]) => {
-            const cardEl = (
-              <div style={{ background: "var(--cream)", borderRadius: "var(--radius)", padding: "1rem", border: "1px solid var(--border-light)", cursor: isMonthly ? "pointer" : "default" }}>
+          {Object.entries(areaBreakdown).map(([aId, data]: [string, any]) => (
+            <Link key={aId} href={`/report?area=${aId}&month=${selectedMonth}`} style={{ textDecoration: "none", color: "inherit" }}>
+              <div style={{ background: "var(--cream)", borderRadius: "var(--radius)", padding: "1rem", border: "1px solid var(--border-light)", cursor: "pointer" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                   <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>{areaMap[aId] || "—"}</span>
                   <span style={{ fontWeight: 800, color: "var(--indigo)", fontSize: "0.95rem" }}>{fmt(data.total)}</span>
                 </div>
                 <div style={{ fontSize: "0.72rem", color: "var(--text-3)", marginBottom: 4 }}>{data.cases} حالة</div>
-                {isMonthly && (
-                  <div style={{ fontSize: "0.7rem", color: "var(--amber)", marginBottom: 6 }}>
-                    كفالات {fmt(data.fixed)} + زيادات {fmt(data.extras)}
-                  </div>
-                )}
+                <div style={{ fontSize: "0.7rem", color: "var(--amber)", marginBottom: 6 }}>
+                  كفالات {fmt(data.fixed)} + زيادات {fmt(data.extras)}
+                </div>
                 <ProgressBar value={data.total} max={totalDisb} color="var(--indigo)" />
               </div>
-            );
-            return isMonthly
-              ? <Link key={aId} href={`/report?area=${aId}&month=${selectedMonth}`} style={{ textDecoration: "none", color: "inherit" }}>{cardEl}</Link>
-              : <div key={aId}>{cardEl}</div>;
-          })}
+            </Link>
+          ))}
         </div>
       </div>
     </div>
@@ -488,7 +468,7 @@ function OverviewTab({ sponsorData, displayFixed, displayTotal, totalCollected, 
 function SadaqatTab({ sadaqat, sadaqatBal, sadaqatIn, sadaqatOut, selectedMonth }: any) {
   const [view, setView] = useState<"inflows" | "outflows">("inflows");
 
-  const all = selectedMonth === "all" ? sadaqat : sadaqat.filter((s: SadaqatEntry) => s.month_year === selectedMonth);
+  const all = sadaqat.filter((s: SadaqatEntry) => s.month_year === selectedMonth);
   const inflows  = all.filter((s: SadaqatEntry) => s.transaction_type === "inflow");
   const outflows = all.filter((s: SadaqatEntry) => s.transaction_type === "outflow");
   const current  = view === "inflows" ? inflows : outflows;
@@ -507,7 +487,7 @@ function SadaqatTab({ sadaqat, sadaqatBal, sadaqatIn, sadaqatOut, selectedMonth 
     <div>
       <h2 style={{ marginBottom: 4 }}>صندوق الصدقات</h2>
       <p style={{ fontSize: "0.82rem", color: "var(--text-3)", marginBottom: 20, margin: "0 0 1.25rem" }}>
-        {selectedMonth === "all" ? "الرصيد التراكمي منذ البداية" : `حركات ${fmtMonth(selectedMonth)}`}
+        {`حركات ${fmtMonth(selectedMonth)}`}
       </p>
 
       {/* Balance card */}
@@ -592,7 +572,7 @@ function LocationsTab({ areaBreakdown, areaMap, totalObligation, selectedMonth }
   const totalExtras = Object.values(areaBreakdown).reduce((s: number, a: any) => s + (a.extras || 0), 0);
   const totalAll    = Object.values(areaBreakdown).reduce((s: number, a: any) => s + a.total, 0);
   const totalCases  = Object.values(areaBreakdown).reduce((s: number, a: any) => s + a.cases, 0);
-  const isHistorical = selectedMonth !== "all";
+  const isHistorical = true;
 
   return (
     <div>

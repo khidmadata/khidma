@@ -102,17 +102,20 @@ export default function CasesPage() {
   }, [rows, search, areaFilter]);
 
   const areaStats = useMemo(() => {
-    const stats: Record<string, { cases: number; total: number }> = {};
+    const stats: Record<string, { caseIds: Set<string>; cases: number; total: number }> = {};
     rows.forEach(r => {
-      if (!stats[r.area_name]) stats[r.area_name] = { cases: 0, total: 0 };
-      stats[r.area_name].cases++;
+      if (!stats[r.area_name]) stats[r.area_name] = { caseIds: new Set(), cases: 0, total: 0 };
+      if (!stats[r.area_name].caseIds.has(r.case_id)) {
+        stats[r.area_name].caseIds.add(r.case_id);
+        stats[r.area_name].cases++;
+      }
       stats[r.area_name].total += r.fixed_amount;
     });
     return stats;
   }, [rows]);
 
   const grandTotal  = rows.reduce((s, r) => s + r.fixed_amount, 0);
-  const grandCases  = rows.length;
+  const grandCases  = new Set(rows.map(r => r.case_id)).size;
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--cream)" }}>
@@ -180,7 +183,7 @@ export default function CasesPage() {
         {/* Count */}
         {!loading && (
           <div style={{ fontSize: "0.78rem", color: "var(--text-3)", marginBottom: 10 }}>
-            {filtered.length} حالة{areaFilter !== "all" ? ` في ${areaFilter}` : ""}{search ? ` — نتائج "${search}"` : ""}
+            {new Set(filtered.map(r => r.case_id)).size} حالة{areaFilter !== "all" ? ` في ${areaFilter}` : ""}{search ? ` — نتائج "${search}"` : ""}
           </div>
         )}
 
@@ -236,7 +239,7 @@ export default function CasesPage() {
                 <tfoot>
                   <tr style={{ background: "var(--surface)", fontWeight: 700 }}>
                     <td colSpan={7} style={{ textAlign: "right", color: "var(--text-2)", fontSize: "0.82rem" }}>
-                      الإجمالي ({filtered.length} حالة)
+                      الإجمالي ({new Set(filtered.map(r => r.case_id)).size} حالة)
                     </td>
                     <td style={{ textAlign: "center", color: "var(--green)", fontWeight: 900 }}>
                       {fmt(filtered.reduce((s, r) => s + r.fixed_amount, 0))} ج
