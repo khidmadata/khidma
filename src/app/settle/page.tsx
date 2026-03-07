@@ -508,7 +508,7 @@ function SettlementTable({
       }
 
       // Save permanent fixed changes
-      if (row.newFixed !== row.fixed && row.newFixed > 0) {
+      if (row.newFixed !== row.fixed) {
         const { error: spErr } = await supabase
           .from("sponsorships")
           .update({ fixed_amount: row.newFixed })
@@ -1027,7 +1027,7 @@ function SettlementTable({
                             <input
                               type="number"
                               value={row.newFixed}
-                              onChange={e => updateRow(idx, { newFixed: Number(e.target.value) || row.fixed })}
+                              onChange={e => updateRow(idx, { newFixed: e.target.value !== "" ? Number(e.target.value) : 0 })}
                               className="input-field"
                               dir="ltr"
                               style={{ fontSize: "0.875rem" }}
