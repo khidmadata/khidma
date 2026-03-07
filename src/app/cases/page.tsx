@@ -107,7 +107,7 @@ export default function CasesPage() {
     })();
   }, []);
 
-  const areas = useMemo(() => [...new Set(rows.map(r => r.area_name))].sort((a, b) => a.localeCompare(b, "ar")), [rows]);
+  const areaNames = useMemo(() => [...new Set(rows.map(r => r.area_name))].sort((a, b) => a.localeCompare(b, "ar")), [rows]);
 
   const filtered = useMemo(() => {
     let r = rows;
@@ -200,7 +200,7 @@ export default function CasesPage() {
           </div>
           <select value={areaFilter} onChange={e => setAreaFilter(e.target.value)} className="select-field" style={{ minWidth: 130 }}>
             <option value="all">كل المناطق</option>
-            {areas.map(a => <option key={a} value={a}>{a}</option>)}
+            {areaNames.map(a => <option key={a} value={a}>{a}</option>)}
           </select>
         </div>
 
