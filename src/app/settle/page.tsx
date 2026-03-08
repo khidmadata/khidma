@@ -244,7 +244,7 @@ function SettlementTable({
 }: {
   area: Area | null;
   monthYear: string;
-  onNext: (fixed: number, extras: number) => void;
+  onNext: () => void;
   onBack: () => void;
 }) {
   const [rows, setRows] = useState<SettleRow[]>([]);
@@ -694,14 +694,7 @@ function SettlementTable({
           </div>
         </div>
 
-        <button
-          onClick={() => {
-            const inc = rows.filter(r => r.included);
-            onNext(inc.reduce((s, r) => s + r.newFixed, 0), inc.reduce((s, r) => s + r.newExtras, 0));
-          }}
-          className="btn btn-primary btn-lg"
-          style={{ width: "100%" }}
-        >
+        <button onClick={onNext} className="btn btn-primary btn-lg" style={{ width: "100%" }}>
           متابعة: الصدقات ←
         </button>
       </div>
@@ -1115,10 +1108,8 @@ const CASE_TYPE_LABELS: Record<string, string> = {
 };
 type AreaCase = { id: string; child_name: string; guardian_name: string | null; case_type: string };
 
-function StepSadaqat({ monthYear, area, step1Fixed, step1Extras, onNext, onBack }: {
-  monthYear: string; area: Area | null;
-  step1Fixed: number; step1Extras: number;
-  onNext: () => void; onBack: () => void;
+function StepSadaqat({ monthYear, area, onNext, onBack }: {
+  monthYear: string; area: Area | null; onNext: () => void; onBack: () => void;
 }) {
   const [cases,        setCases]        = useState<any[]>([]);
   const [operators,    setOperators]    = useState<Operator[]>([]);
@@ -1320,33 +1311,6 @@ function StepSadaqat({ monthYear, area, step1Fixed, step1Extras, onNext, onBack 
           </div>
         )}
       </div>
-
-      {/* Step 1 + Sadaqat grand total summary */}
-      {(step1Fixed + step1Extras) > 0 && (
-        <div className="card" style={{ marginBottom: 16, padding: "0.875rem 1rem" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)", marginBottom: 10, letterSpacing: "0.04em" }}>
-            ملخص التوزيع الكلي — {fmtMonth(monthYear)}
-          </div>
-          <div style={{ display: "grid", gap: 6 }}>
-            {[
-              { label: "كفالات (ثابت)",  val: step1Fixed,                       color: "var(--text-1)" },
-              { label: "زيادات الشهر",   val: step1Extras,                      color: "var(--amber)"  },
-              { label: "صدقات",          val: totalAllocated,                   color: "var(--indigo)" },
-            ].map(row => (
-              <div key={row.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.875rem" }}>
-                <span style={{ color: "var(--text-2)" }}>{row.label}</span>
-                <strong style={{ color: row.color }}>{fmt(row.val)} ج</strong>
-              </div>
-            ))}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1.5px solid var(--border)", paddingTop: 8, marginTop: 2 }}>
-              <span style={{ fontWeight: 700, color: "var(--text-1)" }}>الإجمالي الكلي</span>
-              <strong style={{ fontSize: "1.1rem", color: "var(--green)" }}>
-                {fmt(step1Fixed + step1Extras + totalAllocated)} ج
-              </strong>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Add form */}
       <div className="card" style={{ marginBottom: 16 }}>
@@ -1683,8 +1647,6 @@ function SettlePageInner() {
   const [pageStep,     setPageStep]     = useState<PageStep>("area");
   const [selectedArea, setSelectedArea] = useState<Area | null>(null);
   const [monthYear,    setMonthYear]    = useState("");
-  const [step1Fixed,   setStep1Fixed]   = useState(0);
-  const [step1Extras,  setStep1Extras]  = useState(0);
 
   // Auto-select from URL params (e.g. when reopening from archive)
   useEffect(() => {
@@ -1799,7 +1761,7 @@ function SettlePageInner() {
           <SettlementTable
             area={selectedArea}
             monthYear={monthYear}
-            onNext={(fixed, extras) => { setStep1Fixed(fixed); setStep1Extras(extras); setPageStep("sadaqat"); }}
+            onNext={() => setPageStep("sadaqat")}
             onBack={resetToArea}
           />
         )}
@@ -1807,8 +1769,6 @@ function SettlePageInner() {
           <StepSadaqat
             monthYear={monthYear}
             area={selectedArea}
-            step1Fixed={step1Fixed}
-            step1Extras={step1Extras}
             onNext={() => setPageStep("reports")}
             onBack={() => setPageStep("table")}
           />
