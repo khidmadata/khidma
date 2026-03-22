@@ -55,7 +55,7 @@ function genThreeMonths() {
   const now = new Date();
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const daysLeft = daysInMonth - now.getDate();
-  const includeNext = daysLeft <= 7; // show next month in last 7 days of current month
+  const includeNext = daysLeft <= 9; // show next month in last 10 days of current month
 
   const results: { value: string; label: string }[] = [];
   // past 2 months + current month + optionally next month

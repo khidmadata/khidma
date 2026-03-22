@@ -50,8 +50,8 @@ function genMonthOptions() {
   const opts: { value: string; label: string }[] = [];
   const now = new Date();
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const inLastWeek = now.getDate() >= lastDay - 6;
-  const startI = inLastWeek ? -1 : 0; // include next month only in last 7 days
+  const inLastTen = now.getDate() >= lastDay - 9;
+  const startI = inLastTen ? -1 : 0; // include next month only in last 10 days
   for (let i = startI; i < 24; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -62,9 +62,9 @@ function genMonthOptions() {
 
 function currentMonth() {
   const now = new Date();
-  // In the last 7 days of the month, default to next month (prepare ahead)
+  // In the last 10 days of the month, default to next month (prepare ahead)
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const d = now.getDate() >= lastDay - 6
+  const d = now.getDate() >= lastDay - 9
     ? new Date(now.getFullYear(), now.getMonth() + 1, 1)
     : now;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
