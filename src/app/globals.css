@@ -424,6 +424,63 @@ label.field-label {
 .text-sub   { color: var(--text-2); }
 
 /* ─────────────────────────────────────
+   BOTTOM NAV (mobile)
+───────────────────────────────────── */
+.bottom-nav {
+  display: flex;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  z-index: 50;
+  height: 62px;
+  box-shadow: 0 -2px 12px rgba(0,0,0,0.07);
+}
+
+.bottom-nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 0.58rem;
+  font-weight: 500;
+  color: var(--text-3);
+  text-decoration: none;
+  transition: color 0.15s;
+  padding: 6px 2px;
+}
+
+.bottom-nav-item.active { color: var(--green); }
+
+/* ─────────────────────────────────────
+   MOBILE RESPONSIVE
+───────────────────────────────────── */
+@media (max-width: 767px) {
+  html { font-size: 15px; }
+  html, body { overflow-x: hidden; }
+  body { padding-bottom: 70px; }
+
+  /* Hide dashboard header nav links — BottomNav handles navigation */
+  .header-nav-links { display: none !important; }
+
+  /* Shrink month selector on small screens */
+  .header-month-select { min-width: 110px !important; max-width: 130px !important; }
+
+  /* App header: don't let items overflow */
+  .app-header { padding: 0 0.75rem; gap: 8px; }
+  .app-logo { font-size: 1.05rem; }
+  .app-logo-sub { display: none; }
+}
+
+@media (min-width: 768px) {
+  .bottom-nav { display: none; }
+}
+
+/* ─────────────────────────────────────
    PRINT
 ───────────────────────────────────── */
 @media print {

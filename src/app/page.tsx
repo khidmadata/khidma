@@ -327,7 +327,7 @@ export default function Home() {
           <span className="app-logo-sub">نظام إدارة الكفالات</span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div className="header-nav-links" style={{ display: "flex", gap: 6 }}>
             <Link href="/tahseel"  className="btn btn-secondary btn-sm"><ClipboardList size={15} />التحصيل</Link>
             <Link href="/sadaqat"  className="btn btn-secondary btn-sm"><Heart size={15} />الصدقات</Link>
             <Link href="/cases"    className="btn btn-secondary btn-sm"><Database size={15} />الحالات</Link>
@@ -339,7 +339,7 @@ export default function Home() {
             <select
               value={selectedMonth}
               onChange={e => setSelectedMonth(e.target.value)}
-              className="select-field"
+              className="select-field header-month-select"
               style={{ paddingLeft: 32, minWidth: 150, height: 40, fontSize: "0.82rem", appearance: "none", WebkitAppearance: "none" }}
             >
               {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
