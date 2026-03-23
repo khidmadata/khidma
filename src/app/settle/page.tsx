@@ -1131,7 +1131,9 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
   const [bulkMode,      setBulkMode]      = useState<"none" | "uniform" | "byType">("none");
   const [uniformAmount, setUniformAmount] = useState("");
   const [amountByType,  setAmountByType]  = useState<Record<string, string>>({});
-  const [bulkOperator,  setBulkOperator]  = useState("");
+  const [bulkOpSplits,   setBulkOpSplits]   = useState<Record<string, string>>({});
+  const [entrySplitMode, setEntrySplitMode] = useState(false);
+  const [entryOpSplits,  setEntryOpSplits]  = useState<Record<string, string>>({});
 
   useEffect(() => {
     (async () => {
@@ -1195,26 +1197,47 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
   async function addEntry() {
     if (!amount || Number(amount) <= 0) return;
     setSaving(true);
+    const totalAmt = Number(amount);
     const description = selectedCase
       ? `${selectedCase.child_name}${selectedCase.guardian_name ? ` (${selectedCase.guardian_name})` : ""} — ${selectedCase.area_name}`
       : "";
-    const { data, error } = await supabase.from("sadaqat_pool").insert({
-      transaction_type:        "outflow",
-      amount:                  Number(amount),
-      destination_type:        "kafala_case",
-      destination_case_id:     selectedCase?.id || null,
-      destination_description: description || reason || null,
-      month_year:              monthYear,
-      reason:                  reason || null,
-      approved_by:             receivedBy || null,
-    }).select("*").single();
-    if (!error && data) {
-      setEntries(prev => [...prev, data]);
-      setPoolBalance(prev => prev - Number(amount));
-      if (receivedBy) setOpBalances(prev => ({ ...prev, [receivedBy]: (prev[receivedBy] || 0) - Number(amount) }));
+    if (entrySplitMode) {
+      const splits = operators.map(op => ({ id: op.id, amt: Number(entryOpSplits[op.id]) || 0 })).filter(s => s.amt > 0);
+      const { data: rows, error } = await supabase.from("sadaqat_pool").insert(
+        splits.map(s => ({
+          transaction_type: "outflow", amount: s.amt,
+          destination_type: "kafala_case",
+          destination_case_id: selectedCase?.id || null,
+          destination_description: description || reason || null,
+          month_year: monthYear, reason: reason || null, approved_by: s.id,
+        }))
+      ).select("*");
+      if (!error && rows) {
+        setEntries(prev => [...prev, ...rows]);
+        setPoolBalance(prev => prev - totalAmt);
+        const nb = { ...opBalances };
+        splits.forEach(s => { nb[s.id] = (nb[s.id] || 0) - s.amt; });
+        setOpBalances(nb);
+      }
+      if (error) alert("خطأ: " + error.message);
+    } else {
+      const { data, error } = await supabase.from("sadaqat_pool").insert({
+        transaction_type: "outflow", amount: totalAmt,
+        destination_type: "kafala_case",
+        destination_case_id: selectedCase?.id || null,
+        destination_description: description || reason || null,
+        month_year: monthYear, reason: reason || null,
+        approved_by: receivedBy || null,
+      }).select("*").single();
+      if (!error && data) {
+        setEntries(prev => [...prev, data]);
+        setPoolBalance(prev => prev - totalAmt);
+        if (receivedBy) setOpBalances(prev => ({ ...prev, [receivedBy]: (prev[receivedBy] || 0) - totalAmt }));
+      }
+      if (error) alert("خطأ: " + error.message);
     }
-    if (error) alert("خطأ: " + error.message);
     setSelectedCase(null); setCaseSearch(""); setAmount(""); setReason(""); setReceivedBy("");
+    setEntrySplitMode(false); setEntryOpSplits({});
     setSaving(false);
   }
 
@@ -1251,22 +1274,28 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
     const { error: adjError } = await supabase.from("monthly_adjustments").insert(adjInserts);
     if (adjError) { alert("خطأ: " + adjError.message); setSaving(false); return; }
 
-    // 2. ONE summary entry in sadaqat_pool → shows as single line in صندوق الصدقات
+    // 2. One sadaqat_pool entry per operator split
     const areaLabel = area ? area.name : "إدخال يدوي";
-    const { data: poolData, error: poolError } = await supabase.from("sadaqat_pool").insert({
-      transaction_type:        "outflow",
-      amount:                  bulkTotal,
-      destination_type:        "kafala_case",
-      destination_description: `توزيع جماعي — ${areaLabel} — ${bulkPreview.length} حالة`,
-      month_year:              monthYear,
-      approved_by:             bulkOperator || null,
-    }).select("*").single();
+    const poolDesc = `توزيع جماعي — ${areaLabel} — ${bulkPreview.length} حالة`;
+    const activeSplits = operators
+      .map(op => ({ id: op.id, amt: Number(bulkOpSplits[op.id]) || 0 }))
+      .filter(s => s.amt > 0);
+    const { data: poolRows, error: poolError } = await supabase.from("sadaqat_pool").insert(
+      activeSplits.map(s => ({
+        transaction_type: "outflow", amount: s.amt,
+        destination_type: "kafala_case",
+        destination_description: poolDesc,
+        month_year: monthYear, approved_by: s.id,
+      }))
+    ).select("*");
     if (poolError) { alert("خطأ: " + poolError.message); setSaving(false); return; }
 
-    if (poolData) setEntries(prev => [...prev, poolData]);
+    if (poolRows) setEntries(prev => [...prev, ...poolRows]);
     setPoolBalance(prev => prev - bulkTotal);
-    if (bulkOperator) setOpBalances(prev => ({ ...prev, [bulkOperator]: (prev[bulkOperator] || 0) - bulkTotal }));
-    setBulkMode("none"); setUniformAmount(""); setAmountByType({}); setBulkOperator("");
+    const nb = { ...opBalances };
+    activeSplits.forEach(s => { nb[s.id] = (nb[s.id] || 0) - s.amt; });
+    setOpBalances(nb);
+    setBulkMode("none"); setUniformAmount(""); setAmountByType({}); setBulkOpSplits({});
     setSaving(false);
   }
 
@@ -1368,11 +1397,42 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
               className="input-field" dir="ltr" placeholder="0" />
           </div>
           <div>
-            <label className="field-label">استلمه</label>
-            <select value={receivedBy} onChange={e => setReceivedBy(e.target.value)} className="select-field">
-              <option value="">— اختر المسئول —</option>
-              {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+              <label className="field-label" style={{ margin: 0 }}>استلمه</label>
+              {operators.length >= 2 && (
+                <button type="button" onClick={() => { setEntrySplitMode(v => !v); setEntryOpSplits({}); setReceivedBy(""); }}
+                  style={{ fontSize: "0.72rem", color: "var(--indigo)", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+                  {entrySplitMode ? "← مسؤول واحد" : "تقسيم بين مسؤولَين"}
+                </button>
+              )}
+            </div>
+            {entrySplitMode ? (
+              <div style={{ display: "grid", gap: 6 }}>
+                {operators.map(op => (
+                  <div key={op.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ flex: 1, fontSize: "0.875rem", fontWeight: 600 }}>
+                      {op.name}
+                      <span style={{ color: "var(--text-3)", fontWeight: 400, fontSize: "0.72rem", marginRight: 4 }}>({fmt(opBalances[op.id] || 0)} ج)</span>
+                    </span>
+                    <input type="number" value={entryOpSplits[op.id] || ""}
+                      onChange={e => setEntryOpSplits(prev => ({ ...prev, [op.id]: e.target.value }))}
+                      className="input-field" dir="ltr" placeholder="0" style={{ width: 110 }} />
+                  </div>
+                ))}
+                {Number(amount) > 0 && (() => {
+                  const alloc = operators.reduce((s, op) => s + (Number(entryOpSplits[op.id]) || 0), 0);
+                  const rem = Number(amount) - alloc;
+                  return rem !== 0
+                    ? <div style={{ fontSize: "0.72rem", color: rem > 0 ? "var(--amber)" : "var(--red)" }}>{rem > 0 ? `متبقي ${fmt(rem)} ج` : `تجاوز بـ ${fmt(-rem)} ج`}</div>
+                    : <div style={{ fontSize: "0.72rem", color: "var(--green)" }}>✓ مكتمل</div>;
+                })()}
+              </div>
+            ) : (
+              <select value={receivedBy} onChange={e => setReceivedBy(e.target.value)} className="select-field">
+                <option value="">— اختر المسئول —</option>
+                {operators.map(o => <option key={o.id} value={o.id}>{o.name} ({fmt(opBalances[o.id] || 0)} ج)</option>)}
+              </select>
+            )}
           </div>
         </div>
 
@@ -1390,7 +1450,8 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
 
         <button
           onClick={addEntry}
-          disabled={saving || !amount || Number(amount) <= 0}
+          disabled={saving || !amount || Number(amount) <= 0 ||
+            (entrySplitMode && operators.reduce((s, op) => s + (Number(entryOpSplits[op.id]) || 0), 0) !== Number(amount))}
           className="btn btn-primary"
           style={{ width: "100%", background: "var(--green)" }}
         >
@@ -1500,20 +1561,45 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
               )}
               <div style={{ marginBottom: 10 }}>
                 <label className="field-label">يصرف من رصيد</label>
-                <select value={bulkOperator} onChange={e => setBulkOperator(e.target.value)} className="select-field">
-                  <option value="">— اختر المسؤول —</option>
-                  {operators.map(op => (
-                    <option key={op.id} value={op.id}>{op.name} ({fmt(opBalances[op.id] || 0)} ج)</option>
-                  ))}
-                </select>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {operators.map(op => {
+                    const bal = opBalances[op.id] || 0;
+                    return (
+                      <div key={op.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ flex: 1 }}>
+                          <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>{op.name}</span>
+                          <span style={{ color: bal < 0 ? "var(--red)" : "var(--text-3)", fontSize: "0.75rem", marginRight: 6 }}>({fmt(bal)} ج)</span>
+                        </div>
+                        <input type="number" value={bulkOpSplits[op.id] || ""}
+                          onChange={e => setBulkOpSplits(prev => ({ ...prev, [op.id]: e.target.value }))}
+                          className="input-field" dir="ltr" placeholder="0" style={{ width: 110 }} />
+                      </div>
+                    );
+                  })}
+                  {bulkTotal > 0 && (() => {
+                    const alloc = operators.reduce((s, op) => s + (Number(bulkOpSplits[op.id]) || 0), 0);
+                    const rem = bulkTotal - alloc;
+                    return (
+                      <div style={{ fontSize: "0.78rem", paddingTop: 6, borderTop: "1px solid var(--border-light)" }}>
+                        {rem === 0
+                          ? <span style={{ color: "var(--green)" }}>✓ تم توزيع {fmt(bulkTotal)} ج</span>
+                          : rem > 0
+                          ? <span style={{ color: "var(--amber)" }}>متبقي {fmt(rem)} ج للتخصيص</span>
+                          : <span style={{ color: "var(--red)" }}>تجاوز الإجمالي بـ {fmt(-rem)} ج</span>
+                        }
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => { setBulkMode("none"); setUniformAmount(""); setAmountByType({}); setBulkOperator(""); }} className="btn" style={{ flex: 1, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text-2)" }}>
+                <button onClick={() => { setBulkMode("none"); setUniformAmount(""); setAmountByType({}); setBulkOpSplits({}); }} className="btn" style={{ flex: 1, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text-2)" }}>
                   إلغاء
                 </button>
                 <button
                   onClick={applyBulkDistribution}
-                  disabled={saving || bulkPreview.length === 0 || bulkTotal === 0}
+                  disabled={saving || bulkPreview.length === 0 || bulkTotal === 0 ||
+                    operators.reduce((s, op) => s + (Number(bulkOpSplits[op.id]) || 0), 0) !== bulkTotal}
                   className="btn btn-primary"
                   style={{ flex: 2, background: "var(--green)" }}
                 >

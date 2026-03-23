@@ -231,6 +231,7 @@ export default function SadaqatPage() {
           <AddForm
             cases={cases}
             operators={operators}
+            opBalances={opBalances}
             defaultMonth={selectedMonth === "all" ? currentMonth() : selectedMonth}
             onSaved={() => { setReload(r => r + 1); setTab("entries"); }}
           />
@@ -404,8 +405,8 @@ function CauseBadge({ cause }: { cause: string }) {
 }
 
 // ─── Add Form ─────────────────────────────────────────────────────────────────
-function AddForm({ cases, operators, defaultMonth, onSaved }: {
-  cases: Case[]; operators: Operator[]; defaultMonth: string; onSaved: () => void;
+function AddForm({ cases, operators, opBalances, defaultMonth, onSaved }: {
+  cases: Case[]; operators: Operator[]; opBalances: Record<string, number>; defaultMonth: string; onSaved: () => void;
 }) {
   const [type,         setType]         = useState<"inflow" | "outflow">("inflow");
   const [amount,       setAmount]       = useState("");
@@ -420,6 +421,8 @@ function AddForm({ cases, operators, defaultMonth, onSaved }: {
   const [receivedBy,   setReceivedBy]   = useState("");
   const [saving,       setSaving]       = useState(false);
   const [savedOk,      setSavedOk]      = useState(false);
+  const [splitMode,    setSplitMode]    = useState(false);
+  const [opSplits,     setOpSplits]     = useState<Record<string, string>>({});
 
   const monthOptions = useMemo(() => genMonths().filter(o => o.value !== "all"), []);
 
@@ -434,17 +437,31 @@ function AddForm({ cases, operators, defaultMonth, onSaved }: {
   async function save() {
     if (!amount || Number(amount) <= 0 || !cause) return;
     setSaving(true);
-    const { error } = await supabase.from("sadaqat_pool").insert({
-      transaction_type:        type,
-      amount:                  Number(amount),
-      destination_type:        cause,
-      donor_name:              type === "inflow" ? (donorName.trim() || null) : null,
-      destination_description: (description.trim() || notes.trim()) || null,
-      destination_case_id:     caseId || null,
-      approved_by:             receivedBy || null,
-      month_year:              month,
-    });
-    if (error) { alert("خطأ: " + error.message); setSaving(false); return; }
+    if (type === "outflow" && splitMode) {
+      const splits = operators.map(op => ({ id: op.id, amt: Number(opSplits[op.id]) || 0 })).filter(s => s.amt > 0);
+      const { error } = await supabase.from("sadaqat_pool").insert(
+        splits.map(s => ({
+          transaction_type: "outflow", amount: s.amt,
+          destination_type: cause,
+          destination_description: (description.trim() || notes.trim()) || null,
+          destination_case_id: caseId || null,
+          approved_by: s.id, month_year: month,
+        }))
+      );
+      if (error) { alert("خطأ: " + error.message); setSaving(false); return; }
+    } else {
+      const { error } = await supabase.from("sadaqat_pool").insert({
+        transaction_type:        type,
+        amount:                  Number(amount),
+        destination_type:        cause,
+        donor_name:              type === "inflow" ? (donorName.trim() || null) : null,
+        destination_description: (description.trim() || notes.trim()) || null,
+        destination_case_id:     caseId || null,
+        approved_by:             receivedBy || null,
+        month_year:              month,
+      });
+      if (error) { alert("خطأ: " + error.message); setSaving(false); return; }
+    }
     setSaving(false);
     setSavedOk(true);
     setTimeout(() => { setSavedOk(false); onSaved(); }, 900);
@@ -452,7 +469,8 @@ function AddForm({ cases, operators, defaultMonth, onSaved }: {
 
   function reset() {
     setType("inflow"); setAmount(""); setCause(""); setDonorName(""); setDescription("");
-    setCaseSearch(""); setCaseId(""); setNotes(""); setReceivedBy(""); setSavedOk(false);
+    setCaseSearch(""); setCaseId(""); setNotes(""); setReceivedBy("");
+    setSplitMode(false); setOpSplits({}); setSavedOk(false);
   }
 
   if (savedOk) return (
@@ -577,11 +595,52 @@ function AddForm({ cases, operators, defaultMonth, onSaved }: {
 
         {/* Received / disbursed by */}
         <div>
-          <label className="field-label">{type === "inflow" ? "استلمه" : "وزَّعه"}</label>
-          <select value={receivedBy} onChange={e => setReceivedBy(e.target.value)} className="select-field">
-            <option value="">— اختر المسئول —</option>
-            {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-          </select>
+          {type === "outflow" && operators.length >= 2 ? (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <label className="field-label" style={{ margin: 0 }}>وزَّعه</label>
+                <button type="button" onClick={() => { setSplitMode(v => !v); setOpSplits({}); setReceivedBy(""); }}
+                  style={{ fontSize: "0.72rem", color: "var(--indigo)", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+                  {splitMode ? "← مسؤول واحد" : "تقسيم بين مسؤولَين"}
+                </button>
+              </div>
+              {splitMode ? (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {operators.map(op => (
+                    <div key={op.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ flex: 1, fontSize: "0.875rem", fontWeight: 600 }}>
+                        {op.name}
+                        <span style={{ color: "var(--text-3)", fontWeight: 400, fontSize: "0.72rem", marginRight: 4 }}>({fmt(opBalances[op.id] || 0)} ج)</span>
+                      </span>
+                      <input type="number" value={opSplits[op.id] || ""}
+                        onChange={e => setOpSplits(prev => ({ ...prev, [op.id]: e.target.value }))}
+                        className="input-field" dir="ltr" placeholder="0" style={{ width: 110 }} />
+                    </div>
+                  ))}
+                  {Number(amount) > 0 && (() => {
+                    const alloc = operators.reduce((s, op) => s + (Number(opSplits[op.id]) || 0), 0);
+                    const rem = Number(amount) - alloc;
+                    return rem !== 0
+                      ? <div style={{ fontSize: "0.72rem", color: rem > 0 ? "var(--amber)" : "var(--red)" }}>{rem > 0 ? `متبقي ${fmt(rem)} ج` : `تجاوز بـ ${fmt(-rem)} ج`}</div>
+                      : <div style={{ fontSize: "0.72rem", color: "var(--green)" }}>✓ مكتمل</div>;
+                  })()}
+                </div>
+              ) : (
+                <select value={receivedBy} onChange={e => setReceivedBy(e.target.value)} className="select-field">
+                  <option value="">— اختر المسئول —</option>
+                  {operators.map(o => <option key={o.id} value={o.id}>{o.name} ({fmt(opBalances[o.id] || 0)} ج)</option>)}
+                </select>
+              )}
+            </>
+          ) : (
+            <>
+              <label className="field-label">{type === "inflow" ? "استلمه" : "وزَّعه"}</label>
+              <select value={receivedBy} onChange={e => setReceivedBy(e.target.value)} className="select-field">
+                <option value="">— اختر المسئول —</option>
+                {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </>
+          )}
         </div>
 
         {/* Notes */}
@@ -597,7 +656,8 @@ function AddForm({ cases, operators, defaultMonth, onSaved }: {
 
         <button
           onClick={save}
-          disabled={saving || !amount || Number(amount) <= 0 || !cause}
+          disabled={saving || !amount || Number(amount) <= 0 || !cause ||
+            (type === "outflow" && splitMode && operators.reduce((s, op) => s + (Number(opSplits[op.id]) || 0), 0) !== Number(amount))}
           className="btn btn-primary btn-lg"
           style={{ background: type === "outflow" ? "var(--red)" : undefined }}
         >
