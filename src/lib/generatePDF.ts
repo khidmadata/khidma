@@ -1,194 +1,134 @@
 /**
  * PDF generation utility for خدمة reports.
- * Uses jsPDF + jspdf-autotable with Amiri Arabic font (loaded from CDN).
- * All functions must be called client-side only (call from event handlers).
+ * Uses html2canvas to capture browser-rendered Arabic text (Tajawal font, proper shaping),
+ * then jsPDF to assemble a multi-page PDF.
+ * All functions must be called client-side only.
  */
 
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { supabase } from "@/lib/supabase";
 
-// ─── Font loading (cached per session) ────────────────────────────────────────
-let _fontBase64: string | null = null;
-
-async function loadAmiriFont(): Promise<string> {
-  if (_fontBase64) return _fontBase64;
-  // Amiri is an Arabic/Latin font with full OpenType shaping support (bundled in /public/fonts)
-  const url = "/fonts/Amiri-Regular.ttf";
-  const buf = await fetch(url).then((r) => r.arrayBuffer());
-  const bytes = new Uint8Array(buf);
-  // Convert to base64 in chunks to avoid stack overflow
-  let binary = "";
-  for (let i = 0; i < bytes.byteLength; i += 2048) {
-    binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + 2048, bytes.byteLength)));
-  }
-  _fontBase64 = btoa(binary);
-  return _fontBase64;
-}
-
-// ─── Doc factory ──────────────────────────────────────────────────────────────
-async function makeDoc(): Promise<jsPDF> {
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-  const font = await loadAmiriFont();
-  doc.addFileToVFS("Amiri-Regular.ttf", font);
-  doc.addFont("Amiri-Regular.ttf", "Amiri", "normal");
-  doc.setFont("Amiri");
-  doc.setR2L(true);
-  return doc;
-}
-
 // ─── Constants ────────────────────────────────────────────────────────────────
-const GREEN      = [30, 80, 50]   as [number, number, number];
-const BEIGE      = [228, 221, 211] as [number, number, number];
-const GRAY       = [130, 130, 130] as [number, number, number];
-const W          = 210; // A4 width mm
-const MARGIN     = 14;
-const INNER_W    = W - MARGIN * 2;
+const A4_W   = 794;   // A4 width in px at 96dpi
+const A4_H   = 1123;  // A4 height in px at 96dpi
+const SCALE  = 2;     // Render at 2× for sharp text
 
-const fmt = (n: number) => n.toLocaleString("en");
+const GREEN = "#1e5032";
+const BEIGE = "#e4ddd3";
+const LIGHT = "#f8f5f0";
+
+const fmt = (n: number) => Number(n).toLocaleString("en");
 
 function todayAr() {
-  return new Date().toLocaleDateString("ar-EG", {
-    year: "numeric", month: "long", day: "numeric",
-  });
+  return new Date().toLocaleDateString("ar-EG", { year: "numeric", month: "long", day: "numeric" });
 }
 
-// ─── Header ───────────────────────────────────────────────────────────────────
-function drawHeader(doc: jsPDF, title: string, subtitle: string): number {
-  // Green band
-  doc.setFillColor(...GREEN);
-  doc.rect(0, 0, W, 22, "F");
-  doc.setFontSize(13);
-  doc.setTextColor(255, 255, 255);
-  doc.setFont("Amiri");
-  doc.text("نظام خدمة — إدارة كفالات الأيتام", W / 2, 10, { align: "center" });
-  doc.setFontSize(9);
-  doc.text(subtitle, W / 2, 17, { align: "center" });
+// ─── Core renderer ────────────────────────────────────────────────────────────
+async function renderHTMLToPDF(html: string, filename: string) {
+  // Mount the report off-screen at A4 width so the browser lays it out correctly
+  const wrap = document.createElement("div");
+  wrap.style.cssText = `position:fixed;left:-9999px;top:0;width:${A4_W}px;background:#fff;`;
+  wrap.innerHTML = html;
+  document.body.appendChild(wrap);
 
-  // Report title
-  doc.setTextColor(0, 0, 0);
-  doc.setFontSize(16);
-  doc.text(title, W / 2, 31, { align: "center" });
+  try {
+    await document.fonts.ready;
+    const { default: html2canvas } = await import("html2canvas");
 
-  // Issue date
-  doc.setFontSize(8.5);
-  doc.setTextColor(...GRAY);
-  doc.text(`تاريخ الإصدار: ${todayAr()}`, W / 2, 38, { align: "center" });
-  doc.setTextColor(0, 0, 0);
+    const canvas = await html2canvas(wrap, {
+      scale: SCALE,
+      useCORS: true,
+      backgroundColor: "#ffffff",
+      width: A4_W,
+      windowWidth: A4_W,
+      logging: false,
+    });
 
-  // Divider
-  doc.setDrawColor(...BEIGE);
-  doc.setLineWidth(0.4);
-  doc.line(MARGIN, 42, W - MARGIN, 42);
+    const pdf    = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const PW     = 210;
+    const PH     = 297;
+    const pageH  = A4_H * SCALE;
+    const total  = Math.ceil(canvas.height / pageH);
 
-  return 46; // next Y
-}
+    for (let p = 0; p < total; p++) {
+      if (p > 0) pdf.addPage();
 
-// ─── Summary bar ──────────────────────────────────────────────────────────────
-function drawSummary(
-  doc: jsPDF,
-  items: { label: string; value: string; highlight?: boolean }[],
-  y: number
-): number {
-  const boxH = 24;
-  const colW = INNER_W / items.length;
+      // Slice the full canvas for this page
+      const srcY   = p * pageH;
+      const srcH   = Math.min(pageH, canvas.height - srcY);
+      const pc     = document.createElement("canvas");
+      pc.width     = canvas.width;
+      pc.height    = pageH;
+      const ctx    = pc.getContext("2d")!;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, pc.width, pc.height);
+      ctx.drawImage(canvas, 0, srcY, canvas.width, srcH, 0, 0, canvas.width, srcH);
 
-  doc.setFillColor(248, 245, 240);
-  doc.setDrawColor(...BEIGE);
-  doc.setLineWidth(0.4);
-  doc.roundedRect(MARGIN, y, INNER_W, boxH, 3, 3, "FD");
+      pdf.addImage(pc.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, PW, PH);
 
-  items.forEach((item, i) => {
-    // RTL: item[0] is rightmost
-    const cx = W - MARGIN - colW * i - colW / 2;
-
-    doc.setFontSize(8);
-    doc.setTextColor(...GRAY);
-    doc.setFont("Amiri");
-    doc.text(item.label, cx, y + 9, { align: "center" });
-
-    doc.setFontSize(11);
-    if (item.highlight) {
-      doc.setTextColor(...GREEN);
-    } else {
-      doc.setTextColor(40, 40, 40);
+      // Page number in Helvetica (digits only — no Arabic needed)
+      pdf.setFont("helvetica");
+      pdf.setFontSize(7.5);
+      pdf.setTextColor(150, 150, 150);
+      pdf.text(`${p + 1} / ${total}`, PW / 2, PH - 4, { align: "center" });
+      pdf.setTextColor(0, 0, 0);
     }
-    doc.text(item.value, cx, y + 19, { align: "center" });
 
-    // Divider between columns
-    if (i < items.length - 1) {
-      doc.setDrawColor(210, 205, 195);
-      doc.line(W - MARGIN - colW * (i + 1), y + 4, W - MARGIN - colW * (i + 1), y + boxH - 4);
-    }
-  });
-
-  doc.setTextColor(0, 0, 0);
-  return y + boxH + 6;
-}
-
-// ─── Footers (page X of Y + confidential note + date) ─────────────────────────
-function addFooters(doc: jsPDF) {
-  const totalPages = (doc.internal as any).getNumberOfPages() as number;
-  const pageH = doc.internal.pageSize.getHeight();
-
-  for (let p = 1; p <= totalPages; p++) {
-    doc.setPage(p);
-    doc.setDrawColor(...BEIGE);
-    doc.setLineWidth(0.35);
-    doc.line(MARGIN, pageH - 14, W - MARGIN, pageH - 14);
-
-    doc.setFontSize(7.5);
-    doc.setFont("Amiri");
-    doc.setTextColor(...GRAY);
-
-    // Left side: confidential label
-    doc.text("سري — للاستخدام الداخلي فقط", MARGIN, pageH - 9);
-
-    // Center: page number
-    doc.text(`صفحة ${p} من ${totalPages}`, W / 2, pageH - 9, { align: "center" });
-
-    // Right side: generation date
-    doc.text(todayAr(), W - MARGIN, pageH - 9, { align: "right" });
-
-    doc.setTextColor(0, 0, 0);
+    pdf.save(filename);
+  } finally {
+    document.body.removeChild(wrap);
   }
 }
 
-// ─── Shared table style ───────────────────────────────────────────────────────
-const BASE_STYLES = {
-  font: "Amiri" as const,
-  fontSize: 10,
-  halign: "right" as const,
-  cellPadding: { top: 4, right: 10, bottom: 4, left: 6 },
-  lineColor: [215, 210, 200] as [number, number, number],
-  lineWidth: 0.3,
-};
+// ─── Shared HTML pieces ───────────────────────────────────────────────────────
+function htmlHeader(title: string, subtitle: string) {
+  return `
+    <div style="background:${GREEN};color:#fff;text-align:center;padding:16px 20px;">
+      <div style="font-size:16px;font-weight:800;margin-bottom:5px;">نظام خدمة — إدارة كفالات الأيتام</div>
+      <div style="font-size:12px;opacity:0.8;">${subtitle}</div>
+    </div>
+    <div style="text-align:center;padding:18px 0 6px;font-size:22px;font-weight:900;">${title}</div>
+    <div style="text-align:center;font-size:11px;color:#aaa;margin-bottom:14px;">تاريخ الإصدار: ${todayAr()}</div>
+    <div style="margin:0 18px 16px;border-top:1.5px solid ${BEIGE};"></div>
+  `;
+}
 
-const HEAD_STYLES = {
-  fillColor: GREEN,
-  textColor: [255, 255, 255] as [number, number, number],
-  font: "Amiri" as const,
-  fontStyle: "normal" as const,
-  halign: "center" as const,
-  fontSize: 9.5,
-};
+function htmlFooterNote() {
+  return `
+    <div style="margin:18px;padding-top:10px;border-top:1px solid ${BEIGE};display:flex;justify-content:space-between;font-size:10.5px;color:#aaa;">
+      <span>سري — للاستخدام الداخلي فقط</span>
+      <span>${todayAr()}</span>
+    </div>
+  `;
+}
 
-const FOOT_STYLES = {
-  fillColor: BEIGE,
-  textColor: [50, 50, 50] as [number, number, number],
-  font: "Amiri" as const,
-  fontStyle: "normal" as const,
-  halign: "center" as const,
-  fontSize: 10,
-};
+function htmlWrap(inner: string) {
+  return `<div style="direction:rtl;font-family:'Tajawal','Arial',sans-serif;font-size:13px;color:#222;background:#fff;">${inner}</div>`;
+}
+
+// ─── Summary box ──────────────────────────────────────────────────────────────
+function htmlSummary(items: { label: string; value: string; highlight?: boolean }[]) {
+  const cells = items.map((it, i) => `
+    <div style="flex:1;padding:14px 10px;text-align:center;${i < items.length - 1 ? "border-left:1px solid #ddd6cc;" : ""}">
+      <div style="font-size:10px;color:#999;margin-bottom:6px;">${it.label}</div>
+      <div style="font-size:${it.highlight ? "17px" : "15px"};font-weight:${it.highlight ? "900" : "700"};color:${it.highlight ? GREEN : "#222"};">${it.value}</div>
+    </div>
+  `).join("");
+
+  return `
+    <div style="margin:0 18px 18px;display:flex;background:${LIGHT};border:1.5px solid ${BEIGE};border-radius:8px;overflow:hidden;">
+      ${cells}
+    </div>
+  `;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // REPORT 1 — Area Disbursement (كشف الصرف)
 // ═══════════════════════════════════════════════════════════════════════════════
 export async function generateAreaReportPDF(params: {
   areaName: string;
-  month: string;       // "2026-03"
-  monthLabel: string;  // "مارس ٢٠٢٦"
+  month: string;
+  monthLabel: string;
   rows: Array<{
     name: string;
     case_types: string[];
@@ -202,51 +142,52 @@ export async function generateAreaReportPDF(params: {
   grandTotal: number;
 }) {
   const { areaName, month, monthLabel, rows, grandFixed, grandExtras, grandTotal } = params;
-  const doc = await makeDoc();
 
-  let y = drawHeader(doc, `${areaName} — ${monthLabel}`, "كشف الصرف الشهري للكفالات");
+  const rowsHTML = rows.map((r, i) => `
+    <tr style="background:${i % 2 === 0 ? "#fff" : "#fcfaf7"};">
+      <td style="padding:9px 14px;border-bottom:1px solid #ece7df;">
+        <span style="font-weight:700;">${r.name}</span>
+        ${r.children.length > 1 ? `<div style="font-size:11px;color:#aaa;margin-top:2px;">${r.children.join(" · ")}</div>` : ""}
+      </td>
+      <td style="padding:9px 14px;border-bottom:1px solid #ece7df;text-align:center;color:#666;font-size:12px;">${r.case_types.join("، ")}</td>
+      <td style="padding:9px 14px;border-bottom:1px solid #ece7df;text-align:center;">${r.fixed > 0 ? fmt(r.fixed) : "—"}</td>
+      <td style="padding:9px 14px;border-bottom:1px solid #ece7df;text-align:center;color:${r.extras > 0 ? "#b45309" : "#ccc"};">${r.extras > 0 ? fmt(r.extras) : "—"}</td>
+      <td style="padding:9px 14px;border-bottom:1px solid #ece7df;text-align:center;font-weight:700;color:${GREEN};">${fmt(r.total)}</td>
+    </tr>
+  `).join("");
 
-  y = drawSummary(doc, [
-    { label: "عدد العائلات",     value: `${rows.length} عائلة`             },
-    { label: "إجمالي الكفالات", value: `${fmt(grandFixed)} ج`             },
-    { label: "إجمالي الزيادات", value: grandExtras > 0 ? `${fmt(grandExtras)} ج` : "—" },
-    { label: "الإجمالي الكلي",  value: `${fmt(grandTotal)} ج`, highlight: true },
-  ], y);
+  const html = htmlWrap(`
+    ${htmlHeader(`${areaName} — ${monthLabel}`, "كشف الصرف الشهري للكفالات")}
+    ${htmlSummary([
+      { label: "عدد العائلات",     value: `${rows.length} عائلة` },
+      { label: "إجمالي الكفالات", value: `${fmt(grandFixed)} ج` },
+      { label: "إجمالي الزيادات", value: grandExtras > 0 ? `${fmt(grandExtras)} ج` : "—" },
+      { label: "الإجمالي الكلي",  value: `${fmt(grandTotal)} ج`, highlight: true },
+    ])}
+    <table style="width:calc(100% - 36px);margin:0 18px;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr>
+          <th style="background:${GREEN};color:#fff;padding:10px 14px;text-align:right;font-weight:700;">اسم العائل / المستفيد</th>
+          <th style="background:${GREEN};color:#fff;padding:10px 14px;text-align:center;font-weight:700;width:120px;">نوع الحالة</th>
+          <th style="background:${GREEN};color:#fff;padding:10px 14px;text-align:center;font-weight:700;width:90px;">الكفالة</th>
+          <th style="background:${GREEN};color:#fff;padding:10px 14px;text-align:center;font-weight:700;width:90px;">الزيادات</th>
+          <th style="background:${GREEN};color:#fff;padding:10px 14px;text-align:center;font-weight:700;width:90px;">الإجمالي</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHTML}</tbody>
+      <tfoot>
+        <tr style="background:${BEIGE};font-weight:900;font-size:14px;">
+          <td colspan="2" style="padding:10px 14px;">الإجمالي الكلي</td>
+          <td style="padding:10px 14px;text-align:center;">${fmt(grandFixed)}</td>
+          <td style="padding:10px 14px;text-align:center;">${fmt(grandExtras)}</td>
+          <td style="padding:10px 14px;text-align:center;color:${GREEN};">${fmt(grandTotal)}</td>
+        </tr>
+      </tfoot>
+    </table>
+    ${htmlFooterNote()}
+  `);
 
-  // Columns: left→right in PDF = Total | Extras | Fixed | Type | Name (reads RTL: Name→Type→Fixed→Extras→Total)
-  autoTable(doc, {
-    startY: y,
-    tableWidth: INNER_W,
-    margin: { left: MARGIN, right: MARGIN },
-    head: [["الإجمالي", "الزيادات", "الكفالة", "نوع الحالة", "اسم العائل / المستفيد"]],
-    body: rows.map((r) => [
-      fmt(r.total),
-      r.extras > 0 ? fmt(r.extras) : "—",
-      r.fixed > 0  ? fmt(r.fixed)  : "—",
-      r.case_types.join("، "),
-      r.children.length > 1
-        ? `${r.name}\n${r.children.join(" · ")}`
-        : r.name,
-    ]),
-    foot: [
-      [fmt(grandTotal), fmt(grandExtras), fmt(grandFixed), "", "الإجمالي الكلي"],
-    ],
-    styles: BASE_STYLES,
-    headStyles: HEAD_STYLES,
-    footStyles: { ...FOOT_STYLES, fontStyle: "bold" as const },
-    alternateRowStyles: { fillColor: [252, 250, 247] },
-    columnStyles: {
-      0: { halign: "center", cellWidth: 28 },
-      1: { halign: "center", cellWidth: 26 },
-      2: { halign: "center", cellWidth: 26 },
-      3: { halign: "center", cellWidth: 36 },
-      4: { halign: "right",  cellWidth: "auto" as unknown as number },
-    },
-    rowPageBreak: "avoid",
-  });
-
-  addFooters(doc);
-  doc.save(`كشف_${areaName}_${month}.pdf`);
+  await renderHTMLToPDF(html, `كشف_${areaName}_${month}.pdf`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -274,87 +215,82 @@ export async function generateSadaqatReportPDF(params: {
   opMap: Record<string, string>;
 }) {
   const { month, monthLabel, totalIn, totalOut, balance, inflows, outflows, opMap } = params;
-  const doc = await makeDoc();
 
-  let y = drawHeader(doc, `تقرير الصدقات — ${monthLabel}`, "سجل الحركات المالية لصندوق الصدقات");
+  const inflowRows = inflows.map((e, i) => `
+    <tr style="background:${i % 2 === 0 ? "#fff" : "#f6fdf8"};">
+      <td style="padding:8px 14px;border-bottom:1px solid #e0ede6;">${e.donor_name || e.destination_description || "—"}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #e0ede6;text-align:center;">${opMap[e.approved_by || ""] || "—"}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #e0ede6;text-align:center;">${e.month_year}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #e0ede6;text-align:center;font-weight:700;color:#16a34a;">${fmt(Number(e.amount))} ج</td>
+    </tr>
+  `).join("");
 
-  y = drawSummary(doc, [
-    { label: "إجمالي الوارد",  value: `${fmt(totalIn)} ج`               },
-    { label: "إجمالي الصادر", value: `${fmt(totalOut)} ج`              },
-    { label: "الرصيد الكلي",  value: `${fmt(balance)} ج`, highlight: true },
-  ], y);
+  const outflowRows = outflows.map((e, i) => `
+    <tr style="background:${i % 2 === 0 ? "#fff" : "#fff8f8"};">
+      <td style="padding:8px 14px;border-bottom:1px solid #f0dede;">${e.destination_description || "—"}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #f0dede;text-align:center;">${opMap[e.approved_by || ""] || "—"}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #f0dede;text-align:center;">${e.month_year}</td>
+      <td style="padding:8px 14px;border-bottom:1px solid #f0dede;text-align:center;font-weight:700;color:#dc2626;">${fmt(Number(e.amount))} ج</td>
+    </tr>
+  `).join("");
 
-  // ── Inflows table
-  if (inflows.length > 0) {
-    doc.setFontSize(10);
-    doc.setFont("Amiri");
-    doc.setTextColor(30, 100, 55);
-    doc.text("الوارد — التبرعات", W - MARGIN, y + 6, { align: "right" });
-    doc.setTextColor(0, 0, 0);
-    y += 10;
+  const thGreen = `background:#26643c;color:#fff;padding:10px 14px;font-weight:700;`;
+  const thRed   = `background:#8c2d2d;color:#fff;padding:10px 14px;font-weight:700;`;
 
-    autoTable(doc, {
-      startY: y,
-      tableWidth: INNER_W,
-      margin: { left: MARGIN, right: MARGIN },
-      head: [["المبلغ", "استلمه", "المتبرع / الوصف", "الشهر"]],
-      body: inflows.map((e) => [
-        `${fmt(Number(e.amount))} ج`,
-        opMap[e.approved_by || ""] || "—",
-        e.donor_name || e.destination_description || "—",
-        e.month_year,
-      ]),
-      foot: [[`${fmt(totalIn)} ج`, "", "إجمالي الوارد", ""]],
-      styles: BASE_STYLES,
-      headStyles: { ...HEAD_STYLES, fillColor: [38, 100, 60] as [number, number, number] },
-      footStyles: FOOT_STYLES,
-      alternateRowStyles: { fillColor: [248, 253, 250] },
-      columnStyles: {
-        0: { halign: "center", cellWidth: 32 },
-        1: { halign: "center", cellWidth: 32 },
-        2: { halign: "right"  },
-        3: { halign: "center", cellWidth: 24 },
-      },
-    });
-    y = ((doc as any).lastAutoTable.finalY as number) + 10;
-  }
+  const html = htmlWrap(`
+    ${htmlHeader(`تقرير الصدقات — ${monthLabel}`, "سجل الحركات المالية لصندوق الصدقات")}
+    ${htmlSummary([
+      { label: "إجمالي الوارد",  value: `${fmt(totalIn)} ج` },
+      { label: "إجمالي الصادر", value: `${fmt(totalOut)} ج` },
+      { label: "الرصيد الكلي",  value: `${fmt(balance)} ج`, highlight: true },
+    ])}
 
-  // ── Outflows table
-  if (outflows.length > 0) {
-    doc.setFontSize(10);
-    doc.setFont("Amiri");
-    doc.setTextColor(160, 40, 40);
-    doc.text("الصادر — المصروفات", W - MARGIN, y + 6, { align: "right" });
-    doc.setTextColor(0, 0, 0);
-    y += 10;
+    ${inflows.length > 0 ? `
+      <div style="margin:0 18px 6px;color:#16a34a;font-weight:700;font-size:14px;">الوارد — التبرعات</div>
+      <table style="width:calc(100% - 36px);margin:0 18px 20px;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr>
+            <th style="${thGreen};text-align:right;">المتبرع / الوصف</th>
+            <th style="${thGreen};text-align:center;width:110px;">استلمه</th>
+            <th style="${thGreen};text-align:center;width:90px;">الشهر</th>
+            <th style="${thGreen};text-align:center;width:100px;">المبلغ</th>
+          </tr>
+        </thead>
+        <tbody>${inflowRows}</tbody>
+        <tfoot>
+          <tr style="background:${BEIGE};font-weight:800;">
+            <td colspan="3" style="padding:9px 14px;">إجمالي الوارد</td>
+            <td style="padding:9px 14px;text-align:center;color:#16a34a;">${fmt(totalIn)} ج</td>
+          </tr>
+        </tfoot>
+      </table>
+    ` : ""}
 
-    autoTable(doc, {
-      startY: y,
-      tableWidth: INNER_W,
-      margin: { left: MARGIN, right: MARGIN },
-      head: [["المبلغ", "وزَّعه", "الوصف / الوجهة", "الشهر"]],
-      body: outflows.map((e) => [
-        `${fmt(Number(e.amount))} ج`,
-        opMap[e.approved_by || ""] || "—",
-        e.destination_description || "—",
-        e.month_year,
-      ]),
-      foot: [[`${fmt(totalOut)} ج`, "", "إجمالي الصادر", ""]],
-      styles: BASE_STYLES,
-      headStyles: { ...HEAD_STYLES, fillColor: [140, 45, 45] as [number, number, number] },
-      footStyles: FOOT_STYLES,
-      alternateRowStyles: { fillColor: [255, 250, 250] },
-      columnStyles: {
-        0: { halign: "center", cellWidth: 32 },
-        1: { halign: "center", cellWidth: 32 },
-        2: { halign: "right"  },
-        3: { halign: "center", cellWidth: 24 },
-      },
-    });
-  }
+    ${outflows.length > 0 ? `
+      <div style="margin:0 18px 6px;color:#dc2626;font-weight:700;font-size:14px;">الصادر — المصروفات</div>
+      <table style="width:calc(100% - 36px);margin:0 18px 20px;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr>
+            <th style="${thRed};text-align:right;">الوصف / الوجهة</th>
+            <th style="${thRed};text-align:center;width:110px;">وزَّعه</th>
+            <th style="${thRed};text-align:center;width:90px;">الشهر</th>
+            <th style="${thRed};text-align:center;width:100px;">المبلغ</th>
+          </tr>
+        </thead>
+        <tbody>${outflowRows}</tbody>
+        <tfoot>
+          <tr style="background:${BEIGE};font-weight:800;">
+            <td colspan="3" style="padding:9px 14px;">إجمالي الصادر</td>
+            <td style="padding:9px 14px;text-align:center;color:#dc2626;">${fmt(totalOut)} ج</td>
+          </tr>
+        </tfoot>
+      </table>
+    ` : ""}
 
-  addFooters(doc);
-  doc.save(`تقرير_الصدقات_${month}.pdf`);
+    ${htmlFooterNote()}
+  `);
+
+  await renderHTMLToPDF(html, `تقرير_الصدقات_${month}.pdf`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -373,17 +309,16 @@ const MONTHS_AR: Record<string, string> = {
   "09":"سبتمبر","10":"أكتوبر","11":"نوفمبر","12":"ديسمبر",
 };
 
-function toArabicNumerals(str: string) {
+function toAr(str: string) {
   return str.replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩"[parseInt(d)]);
 }
 
 function fmtMonthLabel(month: string) {
   const [year, m] = month.split("-");
-  return `${MONTHS_AR[m] || m} ${toArabicNumerals(year)}`;
+  return `${MONTHS_AR[m] || m} ${toAr(year)}`;
 }
 
 export async function downloadAreaReportPDF(areaId: string, areaName: string, month: string) {
-  // Fetch cases
   const { data: cases } = await supabase
     .from("cases")
     .select("id, guardian_name, child_name, case_type")
@@ -399,7 +334,6 @@ export async function downloadAreaReportPDF(areaId: string, areaName: string, mo
     supabase.from("monthly_adjustments").select("case_id, amount").eq("month_year", month).in("case_id", caseIds).eq("adjustment_type", "one_time_extra"),
   ]);
 
-  // Build rows per guardian
   const guardianMap = new Map<string, { name: string; case_types: string[]; children: string[]; fixed: number; extras: number; total: number }>();
   for (const c of cases) {
     const fixed  = (sps  || []).filter(s => s.case_id === c.id).reduce((s, r) => s + Number(r.fixed_amount), 0);
