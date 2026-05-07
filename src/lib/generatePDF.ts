@@ -13,8 +13,8 @@ let _fontBase64: string | null = null;
 
 async function loadAmiriFont(): Promise<string> {
   if (_fontBase64) return _fontBase64;
-  // Amiri is an Arabic/Latin font with full OpenType shaping support
-  const url = "https://cdn.jsdelivr.net/npm/amiri-font@0.112.0/fonts/Amiri-Regular.ttf";
+  // Amiri is an Arabic/Latin font with full OpenType shaping support (bundled in /public/fonts)
+  const url = "/fonts/Amiri-Regular.ttf";
   const buf = await fetch(url).then((r) => r.arrayBuffer());
   const bytes = new Uint8Array(buf);
   // Convert to base64 in chunks to avoid stack overflow
