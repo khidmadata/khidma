@@ -1623,10 +1623,21 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
 // STEP "reports" — REPORTS
 // ═══════════════════════════════════════════════════════════════════════════════
 function StepReports({ monthYear, area, onBack }: { monthYear: string; area: Area | null; onBack: () => void }) {
-  const [allAreas, setAllAreas] = useState<Area[]>([]);
-  const [loading,  setLoading]  = useState(!area);
-  const [saved,    setSaved]    = useState<Set<string>>(new Set());
-  const [saving,   setSaving]   = useState<Set<string>>(new Set());
+  const [allAreas,    setAllAreas]    = useState<Area[]>([]);
+  const [loading,     setLoading]     = useState(!area);
+  const [saved,       setSaved]       = useState<Set<string>>(new Set());
+  const [saving,      setSaving]      = useState<Set<string>>(new Set());
+  const [downloading, setDownloading] = useState<Set<string>>(new Set());
+
+  async function handleDownload(a: Area) {
+    setDownloading(prev => new Set(prev).add(a.id));
+    try {
+      const { downloadAreaReportPDF } = await import("@/lib/generatePDF");
+      await downloadAreaReportPDF(a.id, a.name, monthYear);
+    } finally {
+      setDownloading(prev => { const s = new Set(prev); s.delete(a.id); return s; });
+    }
+  }
 
   useEffect(() => {
     if (area) return;
@@ -1691,16 +1702,24 @@ function StepReports({ monthYear, area, onBack }: { monthYear: string; area: Are
               <FileText size={18} style={{ color: "var(--green)" }} />
               <span style={{ fontWeight: 700 }}>كشف {a.name}</span>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button
-                onClick={() => window.open(`/report?area=${a.id}&month=${monthYear}`, "_blank")}
+                onClick={() => handleDownload(a)}
+                disabled={downloading.has(a.id)}
                 className="btn btn-sm"
                 style={{ flex: 1, border: "1.5px solid var(--green)", color: "var(--green)", background: "var(--green-light)" }}
+              >
+                {downloading.has(a.id) ? "..." : "⬇ تحميل PDF"}
+              </button>
+              <button
+                onClick={() => window.open(`/report?area=${a.id}&month=${monthYear}`, "_blank")}
+                className="btn btn-sm btn-ghost"
+                style={{ flex: 1 }}
               >
                 فتح التقرير ↗
               </button>
               {saved.has(a.id) ? (
-                <span style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontSize: "0.82rem", color: "var(--green)", fontWeight: 700 }}>
+                <span style={{ flex: "1 1 100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontSize: "0.82rem", color: "var(--green)", fontWeight: 700 }}>
                   <Check size={14} /> تم الحفظ
                 </span>
               ) : (
@@ -1708,7 +1727,7 @@ function StepReports({ monthYear, area, onBack }: { monthYear: string; area: Are
                   onClick={() => saveReport(a)}
                   disabled={saving.has(a.id)}
                   className="btn btn-sm"
-                  style={{ flex: 1, border: "1.5px solid var(--indigo)", color: "var(--indigo)", background: "rgba(99,102,241,0.08)" }}
+                  style={{ flex: "1 1 100%", border: "1.5px solid var(--indigo)", color: "var(--indigo)", background: "rgba(99,102,241,0.08)" }}
                 >
                   {saving.has(a.id) ? "..." : "حفظ في الأرشيف ✓"}
                 </button>

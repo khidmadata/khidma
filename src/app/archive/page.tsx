@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase";
 import { LayoutDashboard, FileText, Trash2, RotateCcw } from "lucide-react";
 import Link from "next/link";
 
+type DownloadingMap = Record<string, boolean>;
+
 type Report = {
   id: string;
   area_id: string | null;
@@ -32,9 +34,21 @@ function fmtDate(iso: string) {
 
 export default function ArchivePage() {
   const router = useRouter();
-  const [reports, setReports] = useState<Report[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [reports,     setReports]     = useState<Report[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [deleting,    setDeleting]    = useState<string | null>(null);
+  const [downloading, setDownloading] = useState<DownloadingMap>({});
+
+  async function handleDownload(r: Report) {
+    if (!r.area_id) return;
+    setDownloading(prev => ({ ...prev, [r.id]: true }));
+    try {
+      const { downloadAreaReportPDF } = await import("@/lib/generatePDF");
+      await downloadAreaReportPDF(r.area_id, r.area_name, r.month_year);
+    } finally {
+      setDownloading(prev => ({ ...prev, [r.id]: false }));
+    }
+  }
 
   useEffect(() => {
     supabase
@@ -115,18 +129,26 @@ export default function ArchivePage() {
                           <Trash2 size={15} />
                         </button>
                       </div>
-                      <div style={{ display: "flex", gap: 8 }}>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button
-                          onClick={() => window.open(`/report?area=${r.area_id}&month=${r.month_year}`, "_blank")}
+                          onClick={() => handleDownload(r)}
+                          disabled={downloading[r.id]}
                           className="btn btn-sm"
                           style={{ flex: 1, border: "1.5px solid var(--green)", color: "var(--green)", background: "var(--green-light)" }}
+                        >
+                          {downloading[r.id] ? "..." : "⬇ تحميل PDF"}
+                        </button>
+                        <button
+                          onClick={() => window.open(`/report?area=${r.area_id}&month=${r.month_year}`, "_blank")}
+                          className="btn btn-sm btn-ghost"
+                          style={{ flex: 1 }}
                         >
                           فتح التقرير ↗
                         </button>
                         <button
                           onClick={() => router.push(`/settle?area=${r.area_id}&month=${r.month_year}`)}
                           className="btn btn-sm"
-                          style={{ flex: 1, border: "1.5px solid var(--indigo)", color: "var(--indigo)", background: "rgba(99,102,241,0.08)", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}
+                          style={{ flex: "1 1 100%", border: "1.5px solid var(--indigo)", color: "var(--indigo)", background: "rgba(99,102,241,0.08)", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}
                         >
                           <RotateCcw size={13} /> إعادة التسوية
                         </button>

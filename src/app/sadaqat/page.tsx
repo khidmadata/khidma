@@ -239,7 +239,7 @@ export default function SadaqatPage() {
           <ReportView
             entries={filtered}
             totalIn={totalIn} totalOut={totalOut} balance={balance}
-            caseMap={caseMap} selectedMonth={selectedMonth}
+            caseMap={caseMap} opMap={opMap} selectedMonth={selectedMonth}
           />
         )}
       </main>
@@ -672,10 +672,41 @@ function AddForm({ cases, operators, opBalances, defaultMonth, onSaved }: {
 }
 
 // ─── Report View ──────────────────────────────────────────────────────────────
-function ReportView({ entries, totalIn, totalOut, balance, caseMap, selectedMonth }: {
+function ReportView({ entries, totalIn, totalOut, balance, caseMap, opMap, selectedMonth }: {
   entries: Entry[]; totalIn: number; totalOut: number; balance: number;
-  caseMap: Record<string, string>; selectedMonth: string;
+  caseMap: Record<string, string>; opMap: Record<string, string>; selectedMonth: string;
 }) {
+  const [downloading, setDownloading] = useState(false);
+
+  async function handleDownload() {
+    setDownloading(true);
+    try {
+      const { generateSadaqatReportPDF } = await import("@/lib/generatePDF");
+      const inflows  = entries.filter(e => e.transaction_type === "inflow");
+      const outflows = entries.filter(e => e.transaction_type === "outflow");
+      await generateSadaqatReportPDF({
+        month: selectedMonth === "all" ? "all" : selectedMonth,
+        monthLabel: fmtMonth(selectedMonth),
+        totalIn, totalOut, balance,
+        inflows: inflows.map(e => ({
+          amount: e.amount,
+          donor_name: e.donor_name,
+          destination_description: e.destination_description,
+          approved_by: e.approved_by,
+          month_year: e.month_year,
+        })),
+        outflows: outflows.map(e => ({
+          amount: e.amount,
+          destination_description: e.destination_description,
+          approved_by: e.approved_by,
+          month_year: e.month_year,
+        })),
+        opMap,
+      });
+    } finally {
+      setDownloading(false);
+    }
+  }
   const causeBreakdown = useMemo(() => {
     const bd: Record<string, { inflow: number; outflow: number }> = {};
     entries.forEach(e => {
@@ -695,13 +726,14 @@ function ReportView({ entries, totalIn, totalOut, balance, caseMap, selectedMont
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginBottom: 16 }} className="no-print">
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginBottom: 16 }}>
         <button
-          onClick={() => window.print()}
+          onClick={handleDownload}
+          disabled={downloading}
           className="btn btn-secondary btn-sm"
           style={{ gap: 6 }}
         >
-          <FileText size={14} /> طباعة / PDF
+          <FileText size={14} /> {downloading ? "جاري التحميل..." : "تحميل PDF"}
         </button>
       </div>
 

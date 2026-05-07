@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
-import { Printer, ArrowRight, Pencil } from "lucide-react";
+import { Download, ArrowRight, Pencil } from "lucide-react";
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 const fmt = (n: number) => n.toLocaleString("en");
@@ -55,6 +55,7 @@ function ReportContent() {
   const [areaName, setAreaName] = useState("");
   const [rows, setRows] = useState<ReportRow[]>([]);
   const [error, setError] = useState("");
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     if (!areaId || !month) { setError("معاملات مفقودة"); setLoading(false); return; }
@@ -132,6 +133,16 @@ function ReportContent() {
   const grandExtras = rows.reduce((s, r) => s + r.extras, 0);
   const grandTotal  = rows.reduce((s, r) => s + r.total,  0);
 
+  async function handleDownload() {
+    setDownloading(true);
+    try {
+      const { generateAreaReportPDF } = await import("@/lib/generatePDF");
+      await generateAreaReportPDF({ areaName, month, monthLabel: fmtMonth(month), rows, grandFixed, grandExtras, grandTotal });
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   if (loading) return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Tajawal, sans-serif", background: "var(--cream)" }}>
       <div style={{ textAlign: "center", color: "var(--text-3)" }}>جاري تحميل التقرير...</div>
@@ -180,8 +191,8 @@ function ReportContent() {
             ({rows.length} عائلة)
           </span>
         </div>
-        <button onClick={() => window.print()} className="btn btn-primary btn-sm">
-          <Printer size={15} /> طباعة / PDF
+        <button onClick={handleDownload} disabled={downloading} className="btn btn-primary btn-sm">
+          <Download size={15} /> {downloading ? "جاري التحميل..." : "تحميل PDF"}
         </button>
       </div>
 
