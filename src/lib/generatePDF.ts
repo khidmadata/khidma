@@ -25,7 +25,7 @@ function todayAr() {
 
 // ─── Core renderer ────────────────────────────────────────────────────────────
 async function renderHTMLToPDF(html: string, filename: string) {
-  // Mount the report off-screen at A4 width so the browser lays it out correctly
+  // Mount off-screen at A4 width so the browser lays it out correctly
   const wrap = document.createElement("div");
   wrap.style.cssText = `position:fixed;left:-9999px;top:0;width:${A4_W}px;background:#fff;`;
   wrap.innerHTML = html;
@@ -33,40 +33,66 @@ async function renderHTMLToPDF(html: string, filename: string) {
 
   try {
     await document.fonts.ready;
-    const { default: html2canvas } = await import("html2canvas");
 
+    // ── Measure row positions BEFORE capturing (fixed layout is stable) ──────
+    const wrapTop  = wrap.getBoundingClientRect().top; // 0 for position:fixed;top:0
+    const dataRows = [...wrap.querySelectorAll("tbody tr")] as HTMLElement[];
+
+    // Walk rows and record page-break points: whenever the next row's bottom
+    // would exceed the current page's A4 height, start a new page at that row's top.
+    const BOTTOM_PAD = 50; // px buffer so the footer note isn't clipped
+    const pageBreaks: number[] = [0];
+    let pageStart = 0;
+
+    for (const row of dataRows) {
+      const rect      = row.getBoundingClientRect();
+      const rowTop    = rect.top    - wrapTop;
+      const rowBottom = rect.bottom - wrapTop;
+      if (rowBottom > pageStart + A4_H - BOTTOM_PAD && rowTop > pageStart) {
+        pageBreaks.push(rowTop);
+        pageStart = rowTop;
+      }
+    }
+    pageBreaks.push(wrap.scrollHeight + BOTTOM_PAD);
+
+    // ── Capture the full content as one canvas ───────────────────────────────
+    const { default: html2canvas } = await import("html2canvas");
     const canvas = await html2canvas(wrap, {
       scale: SCALE,
       useCORS: true,
       backgroundColor: "#ffffff",
-      width: A4_W,
+      width:      A4_W,
+      height:     wrap.scrollHeight,
       windowWidth: A4_W,
       logging: false,
     });
 
-    const pdf    = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const PW     = 210;
-    const PH     = 297;
-    const pageH  = A4_H * SCALE;
-    const total  = Math.ceil(canvas.height / pageH);
+    // ── Assemble PDF — one page per measured section ─────────────────────────
+    const pdf   = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const PW    = 210;
+    const PH    = 297;
+    const total = pageBreaks.length - 1;
 
     for (let p = 0; p < total; p++) {
       if (p > 0) pdf.addPage();
 
-      // Slice the full canvas for this page
-      const srcY   = p * pageH;
-      const srcH   = Math.min(pageH, canvas.height - srcY);
-      const pc     = document.createElement("canvas");
-      pc.width     = canvas.width;
-      pc.height    = pageH;
-      const ctx    = pc.getContext("2d")!;
+      const srcY     = Math.round(pageBreaks[p]                          * SCALE);
+      const srcH     = Math.round((pageBreaks[p + 1] - pageBreaks[p])   * SCALE);
+      const clampedH = Math.min(srcH, canvas.height - srcY);
+      const pageH    = Math.round(A4_H * SCALE);
+
+      // Draw this section into a full-A4 canvas (white-padded at bottom)
+      const pc  = document.createElement("canvas");
+      pc.width  = canvas.width;
+      pc.height = pageH;
+      const ctx = pc.getContext("2d")!;
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, pc.width, pc.height);
-      ctx.drawImage(canvas, 0, srcY, canvas.width, srcH, 0, 0, canvas.width, srcH);
+      ctx.drawImage(canvas, 0, srcY, canvas.width, clampedH, 0, 0, canvas.width, clampedH);
 
       pdf.addImage(pc.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, PW, PH);
 
-      // Page number in Helvetica (digits only — no Arabic needed)
+      // Page number (Helvetica — digits only, no Arabic shaping needed)
       pdf.setFont("helvetica");
       pdf.setFontSize(7.5);
       pdf.setTextColor(150, 150, 150);
