@@ -56,10 +56,16 @@ async function htmlToPDF(html: string, fileName: string) {
   try {
     const totalH = wrap.scrollHeight;
 
+    // Page margins: 16mm top + bottom per page
+    // 1px = 210/794 mm  →  16mm = round(16 * 794/210) = 60px
+    const MARGIN_MM = 16;
+    const MARGIN_PX = Math.round(MARGIN_MM * A4_W_PX / 210);      // ≈ 60px
+    const USABLE_PX = A4_H_PX - MARGIN_PX * 2;                    // ≈ 1003px usable per page
+
     // Compute safe page-break points (never split a table row)
     const wrapTop   = wrap.getBoundingClientRect().top;
     const breaks: number[] = [0];
-    let limit = A4_H_PX;
+    let limit = USABLE_PX;
 
     for (const row of Array.from(wrap.querySelectorAll("tbody tr"))) {
       const rc        = row.getBoundingClientRect();
@@ -67,7 +73,7 @@ async function htmlToPDF(html: string, fileName: string) {
       const rowBottom = rc.bottom - wrapTop;
       if (rowBottom > limit) {
         breaks.push(rowTop);
-        limit = rowTop + A4_H_PX;
+        limit = rowTop + USABLE_PX;
       }
     }
     breaks.push(totalH + 1);
@@ -100,7 +106,8 @@ async function htmlToPDF(html: string, fileName: string) {
         .drawImage(full, 0, y1, full.width, sh, 0, 0, full.width, sh);
 
       const imgH_mm = (sh / (A4_W_PX * SCALE)) * 210;
-      doc.addImage(slice.toDataURL("image/jpeg", 0.96), "JPEG", 0, 0, 210, imgH_mm);
+      // Offset by top margin — bottom margin falls naturally (usable ≤ 297 − 2×MARGIN_MM)
+      doc.addImage(slice.toDataURL("image/jpeg", 0.96), "JPEG", 0, MARGIN_MM, 210, imgH_mm);
     }
 
     doc.save(fileName);
