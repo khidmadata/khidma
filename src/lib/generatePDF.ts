@@ -82,7 +82,7 @@ function ar(text: string): string {
                   : 0;
       out.push(f[idx] || f[0]);
     }
-    return [...out.map(cp => String.fromCodePoint(cp))].reverse().join("");
+    return out.map(cp => String.fromCodePoint(cp)).join("");
   }).join("\n");
 }
 
@@ -132,7 +132,7 @@ async function makeDoc(): Promise<jsPDF> {
   doc.addFileToVFS("Amiri-Regular.ttf", font);
   doc.addFont("Amiri-Regular.ttf", "Amiri", "normal");
   doc.setFont("Amiri");
-  // NOTE: do NOT call setR2L — we pre-reverse strings ourselves via ar()
+  doc.setR2L(true);
   return doc;
 }
 
