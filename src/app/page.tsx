@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import {
   Users, DollarSign, TrendingUp, TrendingDown, Building2,
-  Search, Plus, FileText, ChevronDown, ClipboardList, Archive, Heart, Database
+  Search, Plus, FileText, ChevronDown, ClipboardList, Archive, Heart, Database, MapPin
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -283,12 +283,12 @@ export default function Home() {
 
   // Fixed sum from area breakdown — same source as area cards (settled areas use disbursements, others use current active)
   const areaFixedSum = Object.values(areaBreakdownForMonth).reduce((s: number, a: any) => s + (a.fixed || 0), 0);
+  // Total sum (fixed + extras) — for settled months disbursements already carry extras_total
+  const areaTotalSum = Object.values(areaBreakdownForMonth).reduce((s: number, a: any) => s + (a.total || 0), 0);
 
-  // Fixed-only baseline: matches exactly what area cards show
   const displayFixed = areaFixedSum;
-
-  // Total baseline: settled → area fixed + monthly_adjustments; unsettled → area fixed only
-  const displayTotal = monthFixed > 0 ? areaFixedSum + monthAdjTotal : areaFixedSum;
+  // For settled months use the disbursement total (fixed+extras); for unsettled months just fixed
+  const displayTotal = monthFixed > 0 ? areaTotalSum : areaFixedSum;
 
   // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
   const COLLECTION_START = "2026-03";
@@ -331,6 +331,7 @@ export default function Home() {
             <Link href="/tahseel"  className="btn btn-secondary btn-sm"><ClipboardList size={15} />التحصيل</Link>
             <Link href="/sadaqat"  className="btn btn-secondary btn-sm"><Heart size={15} />الصدقات</Link>
             <Link href="/cases"    className="btn btn-secondary btn-sm"><Database size={15} />الحالات</Link>
+            <Link href="/areas"    className="btn btn-secondary btn-sm"><MapPin size={15} />المواقع</Link>
             <Link href="/register" className="btn btn-secondary btn-sm"><Plus size={15} />تسجيل</Link>
             <Link href="/settle"   className="btn btn-secondary btn-sm"><FileText size={15} />تسوية</Link>
           </div>
