@@ -286,9 +286,11 @@ export default function Home() {
   // Total sum (fixed + extras) — for settled months disbursements already carry extras_total
   const areaTotalSum = Object.values(areaBreakdownForMonth).reduce((s: number, a: any) => s + (a.total || 0), 0);
 
-  const displayFixed = areaFixedSum;
-  // For settled months use the disbursement total (fixed+extras); for unsettled months just fixed
-  const displayTotal = monthFixed > 0 ? areaTotalSum : areaFixedSum;
+  // For unsettled months carry forward the last settled month's fixed baseline
+  const baseFixed    = monthFixed > 0 ? areaFixedSum : (lastSettledFixed > 0 ? lastSettledFixed : areaFixedSum);
+  const displayFixed = baseFixed;
+  // For settled months use disbursement total (fixed+extras); for unsettled add any extras already entered for this month
+  const displayTotal = monthFixed > 0 ? areaTotalSum : baseFixed + monthAdjTotal;
 
   // Collection tracking starts March 2026. For earlier months treat as 100% of that month's obligation.
   const COLLECTION_START = "2026-03";
