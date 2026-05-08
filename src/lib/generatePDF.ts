@@ -164,14 +164,14 @@ export async function generateAreaReportPDF(params: {
 
   const bodyRows = rows.map((r, i) => `
     <tr style="background:${i % 2 === 0 ? "#fff" : "#FAFAF8"};border-bottom:1px solid #EEE9E2;">
-      <td style="padding:10px 13px;text-align:center;font-weight:700;color:#1E5032;">${fmt(r.total)}</td>
-      <td style="padding:10px 13px;text-align:center;color:${r.extras > 0 ? "#B46414" : "#bbb"};">${r.extras > 0 ? fmt(r.extras) : "—"}</td>
-      <td style="padding:10px 13px;text-align:center;color:#555;">${r.fixed > 0 ? fmt(r.fixed) : "—"}</td>
-      <td style="padding:10px 13px;text-align:center;font-size:12px;color:#666;">${r.case_types.join("، ")}</td>
-      <td style="padding:10px 13px;font-weight:700;color:#1A1A1A;">
+      <td style="padding:10px 13px;text-align:right;font-weight:700;color:#1A1A1A;">
         ${r.name}
-        ${r.children.length > 1 ? `<div style="font-size:11px;color:#aaa;font-weight:400;margin-top:2px;">${r.children.join(" · ")}</div>` : ""}
+        ${r.children.length > 1 ? `<div style="font-size:11px;color:#aaa;font-weight:400;margin-top:2px;text-align:right;">${r.children.join(" · ")}</div>` : ""}
       </td>
+      <td style="padding:10px 13px;text-align:center;font-size:12px;color:#666;">${r.case_types.join("، ")}</td>
+      <td style="padding:10px 13px;text-align:center;color:#555;">${r.fixed > 0 ? fmt(r.fixed) : "—"}</td>
+      <td style="padding:10px 13px;text-align:center;color:${r.extras > 0 ? "#B46414" : "#bbb"};">${r.extras > 0 ? fmt(r.extras) : "—"}</td>
+      <td style="padding:10px 13px;text-align:center;font-weight:700;color:#1E5032;">${fmt(r.total)}</td>
     </tr>`).join("");
 
   const html = `
@@ -194,19 +194,19 @@ export async function generateAreaReportPDF(params: {
     <div style="margin:0 44px;">
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         ${tableHead([
-          { label: "الإجمالي",            center: true },
-          { label: "الزيادات",            center: true },
-          { label: "الكفالة",             center: true },
-          { label: "نوع الحالة",          center: true },
           { label: "اسم العائل / المستفيد" },
+          { label: "نوع الحالة",          center: true },
+          { label: "الكفالة",             center: true },
+          { label: "الزيادات",            center: true },
+          { label: "الإجمالي",            center: true },
         ])}
         <tbody>${bodyRows}</tbody>
         <tfoot>
           <tr style="background:#E4DDD3;font-weight:800;font-size:13px;">
-            <td style="padding:11px 13px;text-align:center;font-size:15px;color:#1E5032;">${fmt(grandTotal)}</td>
-            <td style="padding:11px 13px;text-align:center;">${fmt(grandExtras)}</td>
-            <td style="padding:11px 13px;text-align:center;">${fmt(grandFixed)}</td>
             <td colspan="2" style="padding:11px 13px;text-align:center;">الإجمالي الكلي</td>
+            <td style="padding:11px 13px;text-align:center;">${fmt(grandFixed)}</td>
+            <td style="padding:11px 13px;text-align:center;">${fmt(grandExtras)}</td>
+            <td style="padding:11px 13px;text-align:center;font-size:15px;color:#1E5032;">${fmt(grandTotal)}</td>
           </tr>
         </tfoot>
       </table>
