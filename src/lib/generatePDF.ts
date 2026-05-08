@@ -132,7 +132,6 @@ async function makeDoc(): Promise<jsPDF> {
   doc.addFileToVFS("Amiri-Regular.ttf", font);
   doc.addFont("Amiri-Regular.ttf", "Amiri", "normal");
   doc.setFont("Amiri");
-  doc.setR2L(true);
   return doc;
 }
 
