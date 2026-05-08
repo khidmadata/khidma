@@ -117,7 +117,7 @@ let _font: string | null = null;
 
 async function loadFont(): Promise<string> {
   if (_font) return _font;
-  const buf   = await fetch("/fonts/Amiri-Regular.ttf").then(r => r.arrayBuffer());
+  const buf   = await fetch("/fonts/Tajawal-Regular.ttf").then(r => r.arrayBuffer());
   const bytes = new Uint8Array(buf);
   let bin = "";
   for (let i = 0; i < bytes.byteLength; i += 2048)
@@ -129,9 +129,9 @@ async function loadFont(): Promise<string> {
 async function makeDoc(): Promise<jsPDF> {
   const doc  = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const font = await loadFont();
-  doc.addFileToVFS("Amiri-Regular.ttf", font);
-  doc.addFont("Amiri-Regular.ttf", "Amiri", "normal");
-  doc.setFont("Amiri");
+  doc.addFileToVFS("Tajawal-Regular.ttf", font);
+  doc.addFont("Tajawal-Regular.ttf", "Tajawal", "normal");
+  doc.setFont("Tajawal");
   return doc;
 }
 
@@ -167,7 +167,7 @@ function drawHeader(doc: jsPDF, title: string, subtitle: string): number {
   // Org name
   doc.setFontSize(13);
   doc.setTextColor(C.white[0], C.white[1], C.white[2]);
-  doc.setFont("Amiri");
+  doc.setFont("Tajawal");
   doc.text(ar("نظام خدمة — إدارة كفالات الأيتام"), W / 2, 10, { align: "center" });
 
   // Subtitle
@@ -177,7 +177,7 @@ function drawHeader(doc: jsPDF, title: string, subtitle: string): number {
   // Report title (below green band)
   doc.setTextColor(C.black[0], C.black[1], C.black[2]);
   doc.setFontSize(17);
-  doc.setFont("Amiri");
+  doc.setFont("Tajawal");
   doc.text(ar(title), W / 2, 34, { align: "center" });
 
   // Issue date
@@ -216,7 +216,7 @@ function drawSummary(
 
     doc.setFontSize(7.5);
     doc.setTextColor(C.gray[0], C.gray[1], C.gray[2]);
-    doc.setFont("Amiri");
+    doc.setFont("Tajawal");
     doc.text(ar(item.label), cx, y + 10, { align: "center" });
 
     doc.setFontSize(12);
@@ -249,7 +249,7 @@ function addFooters(doc: jsPDF) {
     doc.line(ML, H - FOOTER + 1, W - MR, H - FOOTER + 1);
 
     doc.setFontSize(7.5);
-    doc.setFont("Amiri");
+    doc.setFont("Tajawal");
     doc.setTextColor(C.gray[0], C.gray[1], C.gray[2]);
 
     doc.text(ar("سري — للاستخدام الداخلي فقط"), ML, H - 5.5);
@@ -264,7 +264,7 @@ function addFooters(doc: jsPDF) {
 // SHARED TABLE STYLES
 // ═══════════════════════════════════════════════════════════════════════════════
 const BASE: Parameters<typeof autoTable>[1]["styles"] = {
-  font:        "Amiri",
+  font:        "Tajawal",
   fontSize:    10,
   halign:      "right",
   cellPadding: { top: 3.5, right: 9, bottom: 3.5, left: 5 },
@@ -277,7 +277,7 @@ const BASE: Parameters<typeof autoTable>[1]["styles"] = {
 const HEAD: Parameters<typeof autoTable>[1]["headStyles"] = {
   fillColor:  C.green,
   textColor:  C.white,
-  font:       "Amiri",
+  font:       "Tajawal",
   fontStyle:  "normal",
   halign:     "center",
   fontSize:   9,
@@ -287,7 +287,7 @@ const HEAD: Parameters<typeof autoTable>[1]["headStyles"] = {
 const FOOT: Parameters<typeof autoTable>[1]["footStyles"] = {
   fillColor:  C.beige,
   textColor:  [50,50,50] as [number,number,number],
-  font:       "Amiri",
+  font:       "Tajawal",
   fontStyle:  "normal",
   halign:     "center",
   fontSize:   10,
@@ -411,7 +411,7 @@ export async function generateSadaqatReportPDF(params: {
   // ── Section label helper
   function sectionLabel(text: string, color: [number,number,number]) {
     doc.setFontSize(10);
-    doc.setFont("Amiri");
+    doc.setFont("Tajawal");
     doc.setTextColor(color[0], color[1], color[2]);
     const cur = (doc as any).lastAutoTable?.finalY ?? y;
     doc.text(ar(text), W - MR, cur + 8, { align: "right" });
