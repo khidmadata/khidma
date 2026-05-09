@@ -65,35 +65,22 @@ function ReportContent() {
   async function load() {
     setLoading(true);
     try {
-      // 1. Area name
-      const { data: area } = await supabase.from("areas").select("name").eq("id", areaId).single();
+      // Batch 1: area name + cases are independent
+      const [{ data: area }, { data: cases }] = await Promise.all([
+        supabase.from("areas").select("name").eq("id", areaId).single(),
+        supabase.from("cases").select("id, guardian_name, child_name, case_type").eq("area_id", areaId).eq("status", "active"),
+      ]);
       setAreaName(area?.name || "");
-
-      // 2. Active cases in area
-      const { data: cases } = await supabase
-        .from("cases")
-        .select("id, guardian_name, child_name, case_type")
-        .eq("area_id", areaId)
-        .eq("status", "active");
 
       if (!cases?.length) { setRows([]); setLoading(false); return; }
 
       const caseIds = cases.map(c => c.id);
 
-      // 3. Sponsorship fixed amounts per case
-      const { data: sps } = await supabase
-        .from("sponsorships")
-        .select("case_id, fixed_amount")
-        .in("case_id", caseIds)
-        .eq("status", "active");
-
-      // 4. Monthly adjustments (extras for this month)
-      const { data: adjs } = await supabase
-        .from("monthly_adjustments")
-        .select("case_id, amount")
-        .eq("month_year", month)
-        .in("case_id", caseIds)
-        .eq("adjustment_type", "one_time_extra");
+      // Batch 2: sponsorships + adjustments both need caseIds but are independent of each other
+      const [{ data: sps }, { data: adjs }] = await Promise.all([
+        supabase.from("sponsorships").select("case_id, fixed_amount").in("case_id", caseIds).eq("status", "active"),
+        supabase.from("monthly_adjustments").select("case_id, amount").eq("month_year", month).in("case_id", caseIds).eq("adjustment_type", "one_time_extra"),
+      ]);
 
       // 5. Build rows — one row per guardian (العائل), aggregating all children
       const guardianMap = new Map<string, ReportRow>();
