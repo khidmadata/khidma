@@ -275,56 +275,53 @@ function SettlementTable({
   async function load() {
     setLoading(true);
 
-    // Load operators
-    const opRes = await supabase.from("operators").select("id, name").neq("name", "شريف");
-    setOperators(opRes.data || []);
-
-    // Load ALL active sponsorships for the add-case search
-    const allSpRes = await supabase
-      .from("sponsorships")
-      .select("id, sponsor_id, case_id, fixed_amount, sponsors(name), cases(child_name, guardian_name, area_id)")
-      .eq("status", "active");
-    setAllSponsorships((allSpRes.data as any) || []);
-
-    // If manual mode: start with empty table
     if (!area) {
+      // Manual mode — just need operators + all sponsorships, both in parallel
+      const [opRes, allSpRes] = await Promise.all([
+        supabase.from("operators").select("id, name").neq("name", "شريف"),
+        supabase.from("sponsorships")
+          .select("id, sponsor_id, case_id, fixed_amount, sponsors(name), cases(child_name, guardian_name, area_id)")
+          .eq("status", "active"),
+      ]);
+      setOperators(opRes.data || []);
+      setAllSponsorships((allSpRes.data as any) || []);
       setRows([]);
       setLoading(false);
       return;
     }
 
-    // Get cases for this area
-    const caseRes = await supabase
-      .from("cases")
-      .select("id")
-      .eq("area_id", area.id)
-      .eq("status", "active");
-    const caseIds = (caseRes.data || []).map((c: any) => c.id);
+    // Batch 1: all three are independent — fire in parallel
+    const [opRes, allSpRes, caseRes] = await Promise.all([
+      supabase.from("operators").select("id, name").neq("name", "شريف"),
+      supabase.from("sponsorships")
+        .select("id, sponsor_id, case_id, fixed_amount, sponsors(name), cases(child_name, guardian_name, area_id)")
+        .eq("status", "active"),
+      supabase.from("cases").select("id").eq("area_id", area.id).eq("status", "active"),
+    ]);
+    setOperators(opRes.data || []);
+    setAllSponsorships((allSpRes.data as any) || []);
 
+    const caseIds = (caseRes.data || []).map((c: any) => c.id);
     if (!caseIds.length) {
       setRows([]);
       setLoading(false);
       return;
     }
 
-    // Get sponsorships for those cases
-    const spRes = await supabase
-      .from("sponsorships")
-      .select("id, sponsor_id, case_id, fixed_amount, sponsors(name), cases(child_name, guardian_name, area_id)")
-      .in("case_id", caseIds)
-      .eq("status", "active");
+    // Batch 2: area sponsorships + adjustments both need caseIds — fire in parallel
+    const [spRes, adjRes] = await Promise.all([
+      supabase.from("sponsorships")
+        .select("id, sponsor_id, case_id, fixed_amount, sponsors(name), cases(child_name, guardian_name, area_id)")
+        .in("case_id", caseIds).eq("status", "active"),
+      supabase.from("monthly_adjustments")
+        .select("id, sponsorship_id, case_id, amount")
+        .eq("month_year", monthYear).eq("adjustment_type", "one_time_extra")
+        .in("case_id", caseIds),
+    ]);
     const sps: Sponsorship[] = (spRes.data as any) || [];
-
-    // Get existing one_time_extra adjustments for this month
-    const adjRes = await supabase
-      .from("monthly_adjustments")
-      .select("id, sponsorship_id, case_id, amount")
-      .eq("month_year", monthYear)
-      .eq("adjustment_type", "one_time_extra")
-      .in("case_id", caseIds);
     const adjs: any[] = adjRes.data || [];
 
-    // Check advance payments for this month
+    // Batch 3: advance payments needs sponsorIds from batch 2
     const sponsorIds = [...new Set(sps.map(s => s.sponsor_id))];
     const firstOfMonth = monthYear + "-01";
     const advRes = await supabase
@@ -1137,11 +1134,19 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
 
   useEffect(() => {
     (async () => {
-      const [cRes, opRes, poolRes, outflowRes] = await Promise.all([
+      const areaId = area?.id ?? null;
+      // Fire all queries in parallel
+      const [cRes, opRes, poolRes, outflowRes, spDataRes, acRes] = await Promise.all([
         supabase.from("cases_by_receiving").select("*"),
         supabase.from("operators").select("id, name").neq("name", "شريف"),
         supabase.from("sadaqat_pool").select("amount, transaction_type, approved_by"),
         supabase.from("sadaqat_pool").select("*").eq("month_year", monthYear).eq("transaction_type", "outflow"),
+        areaId
+          ? supabase.from("sponsorships").select("case_id").eq("status", "active")
+          : Promise.resolve({ data: null as any }),
+        areaId
+          ? supabase.from("cases").select("id, child_name, guardian_name, case_type").eq("area_id", areaId).eq("status", "active")
+          : Promise.resolve({ data: null as any }),
       ]);
       const ops = opRes.data || [];
       setCases((cRes.data as any[]) || []);
@@ -1158,12 +1163,9 @@ function StepSadaqat({ monthYear, area, onNext, onBack }: {
       });
       setOpBalances(bals);
       setEntries(outflowRes.data || []);
-      if (area?.id) {
-        // Only cases that have at least one active sponsorship
-        const { data: spData } = await supabase.from("sponsorships").select("case_id").eq("status", "active");
-        const sponsoredIds = new Set((spData || []).map((s: any) => s.case_id));
-        const { data: ac } = await supabase.from("cases").select("id, child_name, guardian_name, case_type").eq("area_id", area.id).eq("status", "active");
-        setAreaCases((ac || []).filter((c: any) => sponsoredIds.has(c.id)));
+      if (areaId && spDataRes.data && acRes.data) {
+        const sponsoredIds = new Set((spDataRes.data as any[]).map((s: any) => s.case_id));
+        setAreaCases((acRes.data as any[]).filter((c: any) => sponsoredIds.has(c.id)));
       }
       setLoading(false);
     })();
